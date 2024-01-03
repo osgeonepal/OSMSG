@@ -1,0 +1,9 @@
+output
+temp
+*.xlsx
+*.egg-info
+__pycache__
+dist
+.env
+.DS_Store
+node_modules/
