@@ -1,5 +1,7 @@
 # OpenStreetMap Stats Generator
 
+Migrated from (https://github.com/kshitijrajsharma/osmsg)
+
 On the Fly Commandline Stats Generator for OpenStreetMap User Contributions
 
 I tweet stats Every day/week/month for Global/Region and #hotosm hashtag at https://twitter.com/stats_osm and store them [OSMSG Stats Dir](https://github.com/kshitij-raj-sharma/OSMSG-stats/)
