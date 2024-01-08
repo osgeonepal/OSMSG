@@ -27,11 +27,10 @@ jobs:
           pip install --upgrade pip
           pip install flare-floss
           pip install tweepy
-          pip install -r requirements.txt
-
+          pip install poetry
       - name: Install osmsg
         run: |
-          python setup.py install
+          poetry install
 
       - name: Generate Last hour stats
         env: #assign variables
