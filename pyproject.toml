@@ -12,7 +12,7 @@ license = "MIT"
 
 [tool.poetry]
 name = "osmsg"
-version = "0.2.3"
+version = "0.2.4"
 description = "OpenStreetMap Stats Generator: Commandline"
 readme = "README.md"
 authors = [ "Kshitij Raj Sharma <skshitizraj@gmail.com>"]
