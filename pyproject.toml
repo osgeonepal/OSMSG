@@ -2,13 +2,13 @@
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[project]
+[tool.poetry]
 name = "osmsg"
 version = "0.2.3"
-description = "OpenStreetMap Stats Generator : Commandline"
+description = "OpenStreetMap Stats Generator: Commandline"
 readme = "README.md"
-authors = [{name = "Kshitij Raj Sharma", email = "skshitizraj@gmail.com"}]
-license = {text = "MIT"}
+authors = [ "Kshitij Raj Sharma <skshitizraj@gmail.com>"]
+license = "MIT"
 
 [project.scripts]
 osmsg = "osmsg.app:main"
