@@ -4,7 +4,7 @@ On the Fly Commandline Stats Generator for OpenStreetMap User Contributions
 
 I tweet stats Every day/week/month for Global/Region and #hotosm hashtag at https://twitter.com/stats_osm and store them [OSMSG Stats Dir](https://github.com/kshitij-raj-sharma/OSMSG-stats/)
 
-Monitored stats are available under `stats`, Currently Bot monitors OSM as whole , hotosm hashtag , Nepal Country : weekly,monthly and yearly stats are stored in github and twitter
+Monitored stats are available under `stats`, Currently Bot monitors OSM as whole , hotosm hashtag , Nepal Country : weekly,monthly and yearly stats are stored in github and twitter.
 
 ### Usage:
 For installation & Local Setup follow [Installation](./docs/Installation.md)
