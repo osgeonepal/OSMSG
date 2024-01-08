@@ -98,10 +98,10 @@ def Initialize():
     print("Initializing ....")
     # read the GeoJSON file
     countries_df = gpd.read_file(
-        "https://raw.githubusercontent.com/kshitijrajsharma/OSMSG/master/data/countries_un.geojson"
+        "https://raw.githubusercontent.com/osgeonepal/OSMSG/master/data/countries_un.geojson"
     )
     geofabrik_countries = pd.read_csv(
-        "https://raw.githubusercontent.com/kshitijrajsharma/OSMSG/master/data/countries.csv"
+        "https://raw.githubusercontent.com/osgeonepal/OSMSG/master/data/countries.csv"
     )
 
 
