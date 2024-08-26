@@ -313,7 +313,7 @@ def create_charts(df, fname):
         other_editors_count = grouped_editors.iloc[num_categories:].sum()
 
         # Create a new series with the top categories and "others" count
-        editors_data = top_editors.append(
+        editors_data = top_editors._append(
             pd.Series(other_editors_count, index=["Others"])
         )
 
@@ -450,7 +450,7 @@ def create_charts(df, fname):
         # ax.set_yscale("log")
         ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
         plt.savefig(f"{fname}_tags.png", bbox_inches="tight")
-        created_charts.append(f"{fname}_tags.png")
+        created_charts._append(f"{fname}_tags.png")
 
     return created_charts
 
@@ -528,12 +528,16 @@ def update_stats(df1, df2):
     # Iterate over the integer columns and update the values
     for col in int_cols:
         merged_df[col] = merged_df.apply(
-            lambda row: pd.to_numeric(row[f"{col}_x"], errors="coerce")
-            + pd.to_numeric(row[f"{col}_y"], errors="coerce")
-            if pd.notnull(row[f"{col}_x"]) and pd.notnull(row[f"{col}_y"])
-            else pd.to_numeric(row[f"{col}_x"], errors="coerce") or 0
-            if pd.notnull(row[f"{col}_x"])
-            else pd.to_numeric(row[f"{col}_y"], errors="coerce") or 0,
+            lambda row: (
+                pd.to_numeric(row[f"{col}_x"], errors="coerce")
+                + pd.to_numeric(row[f"{col}_y"], errors="coerce")
+                if pd.notnull(row[f"{col}_x"]) and pd.notnull(row[f"{col}_y"])
+                else (
+                    pd.to_numeric(row[f"{col}_x"], errors="coerce") or 0
+                    if pd.notnull(row[f"{col}_x"])
+                    else pd.to_numeric(row[f"{col}_y"], errors="coerce") or 0
+                )
+            ),
             axis=1,
         )
 
@@ -641,12 +645,16 @@ def update_summary(df1, df2):
     # Iterate over the integer columns and update the values
     for col in int_cols:
         merged_df[col] = merged_df.apply(
-            lambda row: pd.to_numeric(row[f"{col}_x"], errors="coerce")
-            + pd.to_numeric(row[f"{col}_y"], errors="coerce")
-            if pd.notnull(row[f"{col}_x"]) and pd.notnull(row[f"{col}_y"])
-            else pd.to_numeric(row[f"{col}_x"], errors="coerce") or 0
-            if pd.notnull(row[f"{col}_x"])
-            else pd.to_numeric(row[f"{col}_y"], errors="coerce") or 0,
+            lambda row: (
+                pd.to_numeric(row[f"{col}_x"], errors="coerce")
+                + pd.to_numeric(row[f"{col}_y"], errors="coerce")
+                if pd.notnull(row[f"{col}_x"]) and pd.notnull(row[f"{col}_y"])
+                else (
+                    pd.to_numeric(row[f"{col}_x"], errors="coerce") or 0
+                    if pd.notnull(row[f"{col}_x"])
+                    else pd.to_numeric(row[f"{col}_y"], errors="coerce") or 0
+                )
+            ),
             axis=1,
         )
     if "editors" in df1.columns:
