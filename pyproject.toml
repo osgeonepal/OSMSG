@@ -1,44 +1,113 @@
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "osmsg"
 version = "0.2.5"
+dynamic = ["version"]
 description = "OpenStreetMap Stats Generator: Commandline"
 readme = "README.md"
-authors = [{name = "Kshitij Raj Sharma", email = "skshitizraj@gmail.com"}]
-license = "MIT"
+authors = [
+    {name = "Kshitij Raj Sharma", email = "skshitizraj@gmail.com"},
+]
+license = {text = "GPL-3.0-only"}
+requires-python = ">=3.9"
+dependencies = [
+    "pandas <= 2.2.2",
+    "osmium <= 3.7.0",
+    "requests <= 2.32.3",
+    "shapely <= 2.0.6",
+    "geopandas <= 1.0.1",
+    "tqdm <= 4.66.5",
+    "seaborn <= 0.13.2",
+    "matplotlib <= 3.9.2",
+    "humanize <= 4.10.0"
+]
 
-[tool.poetry]
-name = "osmsg"
-version = "0.2.4"
-description = "OpenStreetMap Stats Generator: Commandline"
-readme = "README.md"
-authors = [ "Kshitij Raj Sharma <skshitizraj@gmail.com>"]
-license = "MIT"
+keywords = ["osm", "stats", "commandline", "openstreetmap"]
+classifiers = [
+    "Topic :: Utilities",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+[project.urls]
+homepage = "https://github.com/kshitijrajsharma/osmsg"
+documentation = "https://github.com/kshitijrajsharma/osmsg"
+repository = "https://github.com/kshitijrajsharma/osmsg"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4.2",
+    "pytest-mock>=3.14.0",
+    "coverage>=7.6.1",
+    "coverage-badge>=1.1.2",
+]
+docs = [
+    "mkdocs>=1.5.3",
+    "mkdocs-material>=9.4.2",
+    "mkdocstrings-python>=1.7.0",
+    "mkdocs-exclude>=1.0.2",
+]
 
 [project.scripts]
-osmsg = "osmsg.app:main"
+osmsg = "osmsg.app:main"  
 
-[tool.poetry.dependencies]
-python = "^3.6"
-osmium = "*"
-pandas = "==1.5.2"
-requests = "*"
-shapely = "*"
-geopandas = "==0.10.2"
-tqdm = "*"
-seaborn = "*"
-matplotlib = "*"
-humanize = "*"
+[build-system]
+requires = ["pdm-pep517>=1.1.4"]
+build-backend = "pdm.pep517.api"
 
-[tool.poetry.scripts]
-osmsg = "osmsg.app:main"
+[tool.pytest.ini_options]
+addopts = "-ra -q -p no:warnings"
+testpaths = [
+    "tests",
+]
+pythonpath = "osmsg"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-tag_format = "v$version"
+tag_format = "$version"
 version_scheme = "semver"
 version_provider = "pep621"
 update_changelog_on_bump = true
+version_files = [
+    "pyproject.toml:version",
+    "osmsg/__version__.py",
+]
+
+[tool.pdm]
+version = {from = "osmsg/__version__.py"}
+
+[tool.pdm.build]
+includes = ["osmsg"]
+source-includes = ["tests", "LICENSE", "README.md"]
+
+[tool.black]
+line-length = 132
+target-versions = ["py39", "py310", "py311"]
+
+[tool.ruff]
+fix = true
+line-length = 132
+target-version = "py39"
+exclude = [
+    ".git",
+    ".ruff_cache",
+    ".vscode",
+    "__pypackages__",
+    "build",
+    "dist",
+    "osmsg/__version__.py",
+]
+
+[tool.ruff.lint]
+select = ["I", "E", "W", "D", "B", "F", "N", "Q"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.coverage.run]
+source = ["osmsg"]
+
+[tool.coverage.report]
+show_missing = true

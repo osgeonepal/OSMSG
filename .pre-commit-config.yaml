@@ -1,0 +1,28 @@
+repos:
+  # Versioning
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.29.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: "v0.5.7"
+    hooks:
+
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+      - id: ruff-format
+
+  - repo: https://github.com/pycontribs/mirrors-prettier
+    rev: v3.3.3
+    hooks:
+      - id: prettier
+        args: [--ignore-unknown, --no-error-on-unmatched-pattern]
+
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.41.0
+    hooks:
+      - id: markdownlint
+        args: [--fix, --ignore, CHANGELOG.md]

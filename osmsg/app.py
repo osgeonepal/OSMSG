@@ -41,6 +41,7 @@ import pandas as pd
 from matplotlib.font_manager import FontProperties
 from tqdm import tqdm
 
+from .__version__ import __version__
 from .changefiles import (
     get_download_urls_changefiles,
     get_prev_hour,
@@ -471,6 +472,9 @@ def auth(username, password):
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     parser.add_argument(
         "--start_date",
         help="Start date in the format YYYY-MM-DD HH:M:Sz eg: 2023-01-28 17:43:09+05:45",

@@ -1,0 +1,56 @@
+site_name: osmsg
+site_description: Command line stats generator for OpenStreetMap
+site_url: "https://github.com/kshitijrajsharma/osmsg"
+
+repo_name: "kshitijrajsharma/osmsg"
+repo_url: "https://github.com/kshitijrajsharma/osmsg"
+edit_uri: "edit/main/docs/"
+
+extra:
+  social:
+    - icon: "fontawesome/brands/github"
+      link: "https://github.com/kshitijrajsharma/"
+
+
+theme:
+  name: material
+  palette:
+    primary: custom
+
+extra_css:
+  - css/extra.css
+
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+      title: Page contents
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.extra
+  - pymdownx.emoji:
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - exclude:
+      glob:
+        - plugins/*
+        - __pycache__/*
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            members_order: source
+            separate_signature: true
+            filters: ["!^_"]
+            docstring_options:
+              ignore_init_summary: true
+            merge_init_into_class: true
+
+nav:
+  - Home: index.html
