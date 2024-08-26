@@ -450,7 +450,7 @@ def create_charts(df, fname):
         # ax.set_yscale("log")
         ax.yaxis.set_major_formatter(ticker.StrMethodFormatter("{x:,.0f}"))
         plt.savefig(f"{fname}_tags.png", bbox_inches="tight")
-        created_charts._append(f"{fname}_tags.png")
+        created_charts.append(f"{fname}_tags.png")
 
     return created_charts
 
