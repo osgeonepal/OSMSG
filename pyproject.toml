@@ -1,6 +1,6 @@
 [project]
 name = "osmsg"
-version = "0.2.5"
+version = "0.3.0"
 dynamic = ["version"]
 description = "OpenStreetMap Stats Generator: Commandline"
 readme = "README.md"
@@ -66,7 +66,7 @@ pythonpath = "osmsg"
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-tag_format = "$version"
+tag_format = "v$version"
 version_scheme = "semver"
 version_provider = "pep621"
 update_changelog_on_bump = true

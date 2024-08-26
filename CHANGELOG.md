@@ -1,3 +1,13 @@
+## v0.3.0 (2024-08-26)
+
+### Feat
+
+- **toml-installation**: removes unnecessary codes adds toml installation with python build
+
+### Fix
+
+- **append-upgrade**: upgrade pandas .append
+
 ## v0.2.5 (2024-01-08)
 
 ### Fix
