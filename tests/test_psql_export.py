@@ -50,14 +50,13 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
         PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
         .replace("JSONB", "JSON")
         .replace("TEXT", "VARCHAR")
-        .replace("GEOMETRY(POLYGON)", "GEOMETRY")
     )
     conn = duckdb.connect(":memory:")
     conn.execute("INSTALL spatial")
     conn.execute("LOAD spatial")
     for stmt in [s.strip() for s in duckdb_clone.split(";") if s.strip()]:
         upper = stmt.upper()
-        if upper.startswith("CREATE EXTENSION") or "USING GIST" in upper or "USING GIN" in upper:
+        if "USING GIN" in upper:
             continue
         conn.execute(stmt)
     tables = {r[0] for r in conn.execute("SELECT table_name FROM information_schema.tables").fetchall()}
@@ -323,8 +322,12 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
     verifier.execute("LOAD postgres")
     verifier.execute(f"ATTACH '{safe_dsn}' AS pg_src (TYPE postgres, READ_ONLY)")
     try:
-        editor, hashtags, has_geom = verifier.execute(
-            "SELECT editor, hashtags, geom IS NOT NULL FROM pg_src.changesets WHERE changeset_id = 900900"
+        editor, hashtags, min_lon, min_lat, max_lon, max_lat = verifier.execute(
+            """
+            SELECT editor, hashtags, min_lon, min_lat, max_lon, max_lat
+            FROM pg_src.changesets
+            WHERE changeset_id = 900900
+            """
         ).fetchone()
         n_stats = verifier.execute(
             "SELECT COUNT(*) FROM pg_src.changeset_stats WHERE changeset_id = 900900"
@@ -335,7 +338,7 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
 
     assert editor == "JOSM"
     assert hashtags == ["#x"]
-    assert has_geom is True
+    assert (min_lon, min_lat, max_lon, max_lat) == (10.0, 20.0, 11.0, 21.0)
     assert n_stats == 1
 
 

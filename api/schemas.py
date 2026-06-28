@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -7,6 +8,22 @@ class TagValueStats(BaseModel):
     c: int = 0
     m: int = 0
     len: float | None = None
+
+
+class TagKeyStats(BaseModel):
+    c: int = 0
+    m: int = 0
+    len: float | None = None
+
+
+class PaginationMeta(BaseModel):
+    limit: int
+    offset: int
+    returned: int
+    has_next: bool
+    has_previous: bool
+    next_offset: int | None
+    previous_offset: int | None
 
 
 class UserStat(BaseModel):
@@ -27,7 +44,7 @@ class UserStat(BaseModel):
     map_changes: int
     rank: int
     hashtags: list[str] = Field(default_factory=list)
-    tag_stats: dict[str, dict[str, TagValueStats]] | None = None
+    tag_stats: dict[str, TagKeyStats | dict[str, TagValueStats]] | None = None
 
 
 class UserStatsResponse(BaseModel):
@@ -36,9 +53,20 @@ class UserStatsResponse(BaseModel):
     end: datetime | None
     hashtag: list[str] | None
     tags: bool
+    tag_mode: Literal["none", "keys", "all"]
     limit: int
     offset: int
+    pagination: PaginationMeta
     users: list[UserStat]
+
+
+class MapFeatureCollection(BaseModel):
+    type: str = "FeatureCollection"
+    count: int
+    limit: int
+    offset: int
+    pagination: PaginationMeta
+    features: list[dict[str, Any]]
 
 
 class HashtagStat(BaseModel):
@@ -70,6 +98,7 @@ class HashtagStatsResponse(BaseModel):
     interval: str
     limit: int
     offset: int
+    pagination: PaginationMeta
     hashtags: list[HashtagStat]
     trends: list[HashtagTrend]
 
@@ -86,8 +115,10 @@ class EditorStatsResponse(BaseModel):
     count: int
     start: datetime | None
     end: datetime | None
+    include_version: bool
     limit: int
     offset: int
+    pagination: PaginationMeta
     editors: list[EditorStat]
 
 

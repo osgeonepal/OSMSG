@@ -6,6 +6,30 @@ from ..exceptions import OsmsgError
 from ..pg_schema import PG_SCHEMA
 
 
+def _changeset_bbox_select(conn: duckdb.DuckDBPyConnection) -> str:
+    columns = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'changesets'"
+        ).fetchall()
+    }
+    if {"min_lon", "min_lat", "max_lon", "max_lat"}.issubset(columns):
+        return "min_lon, min_lat, max_lon, max_lat"
+    if "geom" in columns:
+        return """
+                CASE WHEN geom IS NOT NULL THEN ST_XMin(geom) END AS min_lon,
+                CASE WHEN geom IS NOT NULL THEN ST_YMin(geom) END AS min_lat,
+                CASE WHEN geom IS NOT NULL THEN ST_XMax(geom) END AS max_lon,
+                CASE WHEN geom IS NOT NULL THEN ST_YMax(geom) END AS max_lat
+        """
+    return """
+                NULL::DOUBLE AS min_lon,
+                NULL::DOUBLE AS min_lat,
+                NULL::DOUBLE AS max_lon,
+                NULL::DOUBLE AS max_lat
+    """
+
+
 def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str) -> None:
     """Push every osmsg table to the libpq DSN target.
 
@@ -37,16 +61,31 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str) -> None:
 
         conn.execute("INSERT INTO pg_target.users SELECT * FROM users ON CONFLICT DO NOTHING")
 
+        bbox_select = _changeset_bbox_select(conn)
+
         # Mirrors the DuckDB-side merge: newer non-NULL wins, NULL never downgrades.
         conn.execute(
-            """
-            INSERT INTO pg_target.changesets AS c (changeset_id, uid, created_at, hashtags, editor, geom)
-            SELECT changeset_id, uid, created_at, hashtags, editor, geom FROM changesets
+            f"""
+            INSERT INTO pg_target.changesets AS c (
+                changeset_id, uid, created_at, hashtags, editor,
+                min_lon, min_lat, max_lon, max_lat
+            )
+            SELECT
+                changeset_id,
+                uid,
+                created_at,
+                hashtags,
+                editor,
+                {bbox_select}
+            FROM changesets
             ON CONFLICT (changeset_id) DO UPDATE SET
                 created_at = COALESCE(EXCLUDED.created_at, c.created_at),
                 hashtags   = COALESCE(EXCLUDED.hashtags,   c.hashtags),
                 editor     = COALESCE(EXCLUDED.editor,     c.editor),
-                geom       = COALESCE(EXCLUDED.geom,       c.geom)
+                min_lon    = COALESCE(EXCLUDED.min_lon,    c.min_lon),
+                min_lat    = COALESCE(EXCLUDED.min_lat,    c.min_lat),
+                max_lon    = COALESCE(EXCLUDED.max_lon,    c.max_lon),
+                max_lat    = COALESCE(EXCLUDED.max_lat,    c.max_lat)
             """
         )
 

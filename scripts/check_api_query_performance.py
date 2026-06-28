@@ -209,7 +209,12 @@ async def main() -> None:
             trend_params,
         )
 
-        await explain(conn, "editor stats", _editor_stats_sql(filter_dates=True), [start, end, args.limit, args.offset])
+        await explain(
+            conn,
+            "editor stats",
+            _editor_stats_sql(filter_dates=True, include_version=False),
+            [start, end, args.limit, args.offset],
+        )
     finally:
         await conn.close()
 

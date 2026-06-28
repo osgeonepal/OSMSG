@@ -141,13 +141,19 @@ OSMSG_EXTRA_ARGS="--name stats --output-dir /var/lib/osmsg --cache-dir /var/cach
 ```text
 GET /
 GET /health
-GET /api/v1/stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&tags=true|false][&limit=N][&offset=N]
+GET /api/v1/stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&tags=true|false][&tag_mode=keys|all][&limit=N][&offset=N]
+GET /api/v1/hashtag-stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&interval=day|week|month][&limit=N][&offset=N]
+GET /api/v1/editor-stats?start=<ISO8601>&end=<ISO8601>[&include_version=true|false][&limit=N][&offset=N]
+GET /api/v1/map?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&limit=N][&offset=N]
 GET /docs/swagger
 ```
 
-`tags=true` (default) returns the per-user `tag_stats` map populated when the worker
-runs with `--all` or `--keys`. Set `tags=false` to skip the JSONB expansion for
-cheaper / smaller responses.
+`tags=true&tag_mode=keys` (the default) returns compact per-key totals. Use
+`tag_mode=all` to opt in to the full key/value breakdown, or `tags=false` to skip
+JSONB expansion for cheaper responses. Editor stats group versions into editor
+families by default; use `include_version=true` for full version strings. Collection
+responses include a `pagination` object with next/previous offset metadata. Map
+features use centroid Point geometry only, ready for clustering and heatmaps.
 
 ## Run the API standalone (without compose)
 
