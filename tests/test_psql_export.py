@@ -46,11 +46,7 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
     """Each individual CREATE statement is well-formed enough that the postgres
     extension's parser would accept it, we use DuckDB's own parser as an
     approximation (DuckDB's CREATE TABLE syntax is compatible)."""
-    duckdb_clone = (
-        PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
-        .replace("JSONB", "JSON")
-        .replace("TEXT", "VARCHAR")
-    )
+    duckdb_clone = PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE").replace("JSONB", "JSON").replace("TEXT", "VARCHAR")
     conn = duckdb.connect(":memory:")
     conn.execute("INSTALL spatial")
     conn.execute("LOAD spatial")

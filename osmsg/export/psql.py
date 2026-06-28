@@ -23,6 +23,7 @@ _BULK_FKS = [
     ("changeset_stats", "changeset_stats_uid_fkey", "FOREIGN KEY (uid) REFERENCES users (uid)"),
 ]
 
+
 def _changeset_bbox_select(conn: duckdb.DuckDBPyConnection) -> str:
     columns = {
         row[0]
