@@ -1,10 +1,10 @@
-"""Stats correctness — the central guarantees osmsg has to hold:
+"""Stats correctness, the central guarantees osmsg has to hold:
 
 1. Hand-counted fixtures match the queried output exactly.
 2. Processing the same .osc file twice does not double-count or drop anything.
 3. Multi-worker (parallel) processing produces identical totals to single-worker.
 4. Long-running changesets that span multiple replication files aggregate correctly.
-5. No user is ever silently dropped — every uid in the input shows up in user_stats.
+5. No user is ever silently dropped, every uid in the input shows up in user_stats.
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ def test_user_stats_match_hand_counted_changes(tmp_path, osc_factory, changefile
     assert r["rels_create"] == 1
     assert r["poi_create"] == 3
     assert r["poi_modify"] == 1
-    # map_changes is the sum of the nine element columns — never the POI ones.
+    # map_changes is the sum of the nine element columns, never the POI ones.
     assert r["map_changes"] == 5 + 2 + 1 + 3 + 1 + 0 + 1 + 0 + 0
 
 
@@ -228,7 +228,7 @@ def test_processing_same_file_twice_yields_identical_stats(tmp_path, osc_factory
 
     # Defensive: the underlying changeset_stats table must contain exactly one row.
     cs_count = db.execute("SELECT COUNT(*) FROM changeset_stats").fetchone()[0]
-    assert cs_count == 1, "INSERT OR IGNORE failed — duplicate stats rows from second pass"
+    assert cs_count == 1, "INSERT OR IGNORE failed, duplicate stats rows from second pass"
 
 
 # 3) Parallel equivalence: multiple workers vs single worker
@@ -381,7 +381,7 @@ def test_merge_picks_up_every_worker_shard(tmp_path, osc_factory, changefile_con
     assert rows[0]["nodes_create"] == 8
 
 
-# 7) Hashtag pipeline ground-truth — the user-facing guarantee that motivates this tool.
+# 7) Hashtag pipeline ground-truth, the user-facing guarantee that motivates this tool.
 #    A change to either ChangesetHandler or ChangefileHandler that drops a single
 #    matched changeset, miscounts an element, or loses a hashtag must fail this test.
 #    The fixture mirrors real-world quirks observed in OSM changeset replication:
@@ -525,7 +525,7 @@ def test_hashtag_pipeline_drops_unmatched_changeset_elements(tmp_path, osc_facto
     """Element edits whose changeset doesn't match the hashtag filter must NOT be counted.
 
     Direct regression for `_should_collect`: empty `valid_changesets` means the filter
-    matched nothing — drop everything, NOT 'no filter, keep everything'."""
+    matched nothing, drop everything, NOT 'no filter, keep everything'."""
     osc = osc_factory(
         "off.osc",
         [
@@ -552,7 +552,7 @@ def test_hashtag_pipeline_drops_unmatched_changeset_elements(tmp_path, osc_facto
 
 def test_hashtag_filter_keeps_changeset_with_no_in_window_edits(tmp_path, changefile_config):
     """A matched changeset that has zero edits in the time window still belongs in the
-    `changesets` table (so attach_metadata reports it) — but contributes 0 to user_stats."""
+    `changesets` table (so attach_metadata reports it), but contributes 0 to user_stats."""
     cs_xml = _write_changeset_xml(
         tmp_path,
         "cs_only.osm",

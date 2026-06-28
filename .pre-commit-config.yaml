@@ -11,6 +11,7 @@ repos:
       - id: check-merge-conflict
       - id: check-toml
       - id: check-yaml
+        exclude: ^packaging/conda/meta\.yaml$  # conda recipe uses Jinja templating, not plain YAML
       - id: check-json
       - id: fix-byte-order-marker
 

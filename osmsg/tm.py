@@ -33,7 +33,7 @@ def _fetch_one(project_id: str) -> tuple[str, list[dict[str, Any]]]:
 def fetch_user_stats(project_ids: list[str], usernames: set[str]) -> dict[str, dict[str, Any]]:
     """Aggregate tasks_mapped/validated/total per matching user across all projects.
 
-    Project requests are issued in parallel with a bounded thread pool — the public
+    Project requests are issued in parallel with a bounded thread pool, the public
     TM API is rate-limited but tolerant of small bursts; failures are absorbed
     silently so one bad project never breaks an entire run.
     """

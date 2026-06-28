@@ -9,3 +9,19 @@ dist
 node_modules/
 stats.*
 *.parquet
+
+.claude/
+
+# experiment artifacts (large)
+experiments/parquet-history/cache/
+experiments/parquet-history/data/
+experiments/parquet-history/out/
+experiments/parquet-history/out_demo/
+experiments/parquet-history/planet_work/
+
+# QA / scratch (generated)
+experiments/parquet-history/qa_alltime/
+experiments/parquet-history/*_work/
+/qa/
+
+CLAUDE.md

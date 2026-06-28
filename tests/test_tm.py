@@ -60,7 +60,7 @@ def test_fetch_user_stats_sums_across_projects(fake_tm_api):
     assert out["alice"]["tasks_mapped"] == 8  # 5 + 3
     assert out["alice"]["tasks_validated"] == 3
     assert out["alice"]["tasks_total"] == 11
-    # mapping level: first non-null wins (parallel order is non-deterministic — both seen are valid)
+    # mapping level: first non-null wins (parallel order is non-deterministic, both seen are valid)
     assert out["alice"]["tm_mapping_level"] in {"BEGINNER", "INTERMEDIATE"}
     assert out["bob"]["tasks_mapped"] == 8
 

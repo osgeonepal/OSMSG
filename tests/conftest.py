@@ -12,6 +12,13 @@ import pytest
 from osmsg.db.schema import create_tables
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path, monkeypatch):
+    """Run each test from its own tmp dir so a CLI or pipeline run never writes stats.* into the repo
+    root (which would otherwise trip pre-commit's modified-files check)."""
+    monkeypatch.chdir(tmp_path)
+
+
 def _writer(path: Path) -> osmium.SimpleWriter:
     return osmium.SimpleWriter(str(path), overwrite=True)
 

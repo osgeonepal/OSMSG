@@ -1,7 +1,7 @@
 """DuckDB persistence: schema, ingest, queries.
 
 The schema is portable: identical column shape works in DuckDB, Parquet, and
-PostgreSQL — exporters re-issue the CREATE TABLE there.
+PostgreSQL, exporters re-issue the CREATE TABLE there.
 
 Public surface:
 

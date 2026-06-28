@@ -25,7 +25,7 @@ osmsg --country nepal --country india --country africa   # Geofabrik regions, re
 ```
 
 > When `--url` is omitted, osmsg picks a planet replication granularity that fits the requested
-> span: minute for spans under 6h, hour for 6h–7d, day for ≥7d. A warning prints when the
+> span: minute for spans under 6h, hour for 6h to 7d, day for 7d or more. A warning prints when the
 > auto-switch happens; pass `--url` explicitly to override (also suppressed by `--country`,
 > `--update`, or multiple `--url` values).
 
@@ -41,7 +41,7 @@ osmsg --boundary '{"type":"Polygon",...}'     # inline GeoJSON string
 ```
 
 > `--boundary` filters changesets whose bounding box intersects the given geometry.
-> A Geofabrik region name resolves from the same index as `--country` — no separate file needed.
+> A Geofabrik region name resolves from the same index as `--country`, no separate file needed.
 > `--boundary` only filters; it does not change the replication source.
 > To scope the replication source to a country's diffs, use `--country` instead.
 >
@@ -77,9 +77,15 @@ osmsg --last day -f psql --psql-dsn "host=localhost dbname=osm user=osm"
 > breakdown is just a query over the four base tables, so consumers derive it on demand instead of
 > duplicating data.
 
+`<name>.duckdb` is stamped with the query that built it. Rerunning the same query with a different `-f`
+re-exports straight from that store, so adding a format is instant. Changing any query parameter
+(window, hashtags, tags, boundary) recomputes; `--overwrite` forces a fresh recompute.
+
 ## Config file
 
-Long invocations are easier to maintain in YAML. Keys mirror the CLI flag names.
+Long invocations are easier to maintain in YAML. Each key is the option's underscore name (the flag
+with `-` turned to `_`, so `output_dir`, `history_url`, `psql_dsn`); `--all` is `all_stats` and
+`--keys` is `keys_only`. A key that matches no option is ignored.
 
 ```bash
 osmsg --config nepal.yaml                      # all flags from yaml
@@ -106,6 +112,72 @@ update: true
 Downloaded `.osc.gz` files cache to a per-user dir (`~/Library/Caches/osmsg` on macOS,
 `~/.cache/osmsg` on Linux). Re-running the same range reuses them, so no network is needed.
 `--cache-dir` to relocate, `--delete-temp` to clean up after a run.
+
+## Setting up a store
+
+`--insert` loads history into the store and seeds the resume position, then exits. Follow it with
+`--update` to catch up to now and keep current. DuckDB is the default store; pass `--psql-dsn` to use
+Postgres (no separate `-f psql` needed).
+
+```bash
+osmsg --insert                                   # load all published history into stats.duckdb
+osmsg --update                                   # catch up to now, then run on cron
+
+osmsg --insert --psql-dsn "host=localhost dbname=osm user=osm"   # into Postgres (bulk first load)
+osmsg --insert --start 2020-01-01 --end 2023-01-01               # a slice; --update continues from its end
+osmsg --insert --osh-file history.osh.pbf --changeset-file changesets.osm.bz2  # from local files
+```
+
+- No window loads the whole dataset; `--start/--end` loads a slice and resumes from the slice end.
+- `--osh-file` with `--changeset-file` converts local planet files into the store (offline, or a custom
+  extract). Give both together.
+- The Postgres load uses the bulk path (drops indexes and keys, rebuilds after).
+
+`--insert` and `--update` pick the replication granularity from how far behind the store is. A fresh
+store clears the multi-week backlog on day diffs (tens of files), then refines to hour and minute as it
+stays current. For near-real-time, run `osmsg --update --url minute`. A store tracks one granularity at
+a time; changing it hands off at the day boundary, so the windows stay disjoint. Pass `--url` to either
+command to set the granularity yourself.
+
+## Cloud-native history
+
+Months covered by a published parquet dataset (default `kshitijrajsharma/osmsg-history` on
+HuggingFace) are read remotely. The recent uncovered tail uses the live replication path. This is on
+by default.
+
+```bash
+osmsg --start 2015-01-01 --end 2020-01-01     # read from the dataset
+osmsg --start 2024-01-01                       # covered months remote, current month live
+osmsg --last week --no-history                  # live path only
+```
+
+- `--no-history` (env `OSMSG_HISTORY=0`) uses the live path.
+- `--history-url` (env `OSMSG_HISTORY_URL`) sets the dataset location.
+- The live path is used when the dataset is unreachable, with `--update`, and with `--length`.
+
+### Postgres as a source of truth
+
+`osmsg --insert --psql-dsn ...` loads the dataset into osmsg's schema and seeds the resume position;
+`osmsg --update --psql-dsn ...` then keeps Postgres current. `--psql-bulk` (env `OSMSG_PSQL_BULK`)
+forces the bulk path on a plain run; `--insert` already uses it.
+
+## Maintaining the dataset
+
+`osmsg maintain` builds and publishes the history parquet.
+
+```bash
+osmsg maintain month 2026-06 --repo osgeonepal/osmsg-history   # build one finished month and upload
+osmsg maintain month 2026-06 --no-upload                       # build locally, review, upload later
+osmsg maintain publish out --repo osgeonepal/osmsg-history     # write + upload manifest.json
+osmsg maintain convert history.osh.pbf changesets.osm.bz2 2005-01-01 2026-06-01 work --parts 24
+```
+
+`month` builds from the live day diffs, exports the two partitions, uploads, and advances the
+manifest. It refuses to publish a month whose data stops short of the month boundary (pass
+`--allow-incomplete` to override), so published months are complete by construction. Re-running
+`osmsg maintain month <YYYY-MM>` rebuilds a month and overwrites its published partition, which repairs
+a month that was first generated from a mid-day planet snapshot. `convert` turns local planet files
+into the datasets out of core. Uploads use the `hf` CLI (`uvx`), so be logged in to HuggingFace.
 
 ## Credentials
 

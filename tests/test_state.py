@@ -1,4 +1,4 @@
-"""Single-row resume state per source_url — replaces the old per-run audit log."""
+"""Single-row resume state per source_url, replaces the old per-run audit log."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_upsert_state_independent_per_source_url(fresh_db):
 
 
 def test_create_tables_is_idempotent(tmp_path):
-    """create_tables() must be safe to call repeatedly — that's how --update opens existing DBs."""
+    """create_tables() must be safe to call repeatedly, that's how --update opens existing DBs."""
     import duckdb
 
     conn = duckdb.connect(str(tmp_path / "x.duckdb"))

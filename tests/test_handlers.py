@@ -10,9 +10,9 @@ from osmsg.handlers import ChangefileHandler, ChangesetHandler
 
 
 def _write_changeset_xml(tmp_path, name, changesets):
-    """Hand-written changeset XML — osmium's SimpleWriter doesn't support changesets.
+    """Hand-written changeset XML, osmium's SimpleWriter doesn't support changesets.
 
-    Pass ``open=True`` to emit a still-open entry (no ``closed_at`` attribute) — that
+    Pass ``open=True`` to emit a still-open entry (no ``closed_at`` attribute), that
     matches what OSM replication serializes for changesets that haven't closed yet,
     and is what osmium turns into ``closed_at = 1970-01-01`` (the epoch sentinel).
     """
@@ -293,10 +293,11 @@ def test_changeset_handler_first_seen_wins_on_duplicate_ids(tmp_path, changeset_
     assert h.changesets[1].hashtags == ["#hotosm-foo"]
 
 
-def test_changeset_handler_window_filter_drops_padding(tmp_path, changeset_config):
-    """Replication padding (~60 min on each side) drags in adjacent-window changesets.
-    With window_start_utc/window_end_utc set, those must be dropped so attach_metadata
-    doesn't leak hashtags from outside the requested window onto in-window users."""
+def test_changeset_handler_window_filter_drops_only_pre_window_closures(tmp_path, changeset_config):
+    """Backward-pad changesets that closed entirely before window_start are dropped (they'd
+    leak hashtags onto in-window users via attach_metadata). Everything else, including
+    changesets created past window_end, is kept so the next tick (which resumes at
+    last_seq+1) doesn't have to refetch them; otherwise they'd remain permanent stubs."""
     changeset_config["hashtags"] = ["#hotosm"]
     changeset_config["window_start_utc"] = dt.datetime(2026, 4, 27, 21, 4, tzinfo=dt.UTC)
     changeset_config["window_end_utc"] = dt.datetime(2026, 4, 27, 21, 54, tzinfo=dt.UTC)
@@ -319,7 +320,7 @@ def test_changeset_handler_window_filter_drops_padding(tmp_path, changeset_confi
                 "closed_at": "2026-04-27T21:04:00Z",
                 "tags": {"hashtags": "#hotosm-edge1"},
             },
-            # spans window start → KEEP (overlaps window)
+            # spans window start → KEEP
             {
                 "id": 3,
                 "created_at": "2026-04-27T20:30:00Z",
@@ -340,14 +341,16 @@ def test_changeset_handler_window_filter_drops_padding(tmp_path, changeset_confi
                 "closed_at": "2026-04-27T22:10:00Z",
                 "tags": {"hashtags": "#hotosm-spans-end"},
             },
-            # created AT window end → drop (created >= end)
+            # created AT window end → KEEP (no `created >= end` filter anymore)
             {
                 "id": 6,
                 "created_at": "2026-04-27T21:54:00Z",
                 "closed_at": "2026-04-27T22:10:00Z",
                 "tags": {"hashtags": "#hotosm-edge2"},
             },
-            # entirely after window → drop
+            # created+closed entirely after window → KEEP. The next --update tick resumes
+            # past this changeset's events; dropping it here would leave it a permanent
+            # stub in changeset_stats. Bleed bound: at most one diff past end_date.
             {
                 "id": 7,
                 "created_at": "2026-04-27T22:10:00Z",
@@ -358,15 +361,13 @@ def test_changeset_handler_window_filter_drops_padding(tmp_path, changeset_confi
     )
     h = ChangesetHandler(changeset_config)
     h.apply_file(str(p))
-    assert set(h.changesets.keys()) == {3, 4, 5}
+    assert set(h.changesets.keys()) == {3, 4, 5, 6, 7}
 
 
 def test_changeset_handler_window_filter_keeps_still_open_changesets(tmp_path, changeset_config):
-    """Regression: a changeset that is still open at replication-snapshot time has no
-    `closed_at` attribute, which osmium surfaces as `closed_at = 1970-01-01`. A naive
-    `closed_at <= window_start` check drops it — but its edits could still land in
-    the window. Gate the check on `c.open` so still-open changesets are kept whenever
-    `created_at < window_end`."""
+    """Still-open changesets land regardless of when they were opened: the `c.open` gate
+    skips the `closed_at <= start` check (osmium reports 1970 for the sentinel), and no
+    upper-bound on created_at is applied (would otherwise create permanent stubs)."""
     changeset_config["hashtags"] = ["#hotosm"]
     changeset_config["window_start_utc"] = dt.datetime(2026, 4, 27, 21, 4, tzinfo=dt.UTC)
     changeset_config["window_end_utc"] = dt.datetime(2026, 4, 27, 21, 54, tzinfo=dt.UTC)
@@ -375,17 +376,16 @@ def test_changeset_handler_window_filter_keeps_still_open_changesets(tmp_path, c
         tmp_path,
         "cs_open.osm",
         [
-            # Created in window, still open → KEEP (edits could be landing now)
             {"id": 1, "created_at": "2026-04-27T21:50:00Z", "open": True, "tags": {"hashtags": "#hotosm-still-open"}},
-            # Created before window, still open → KEEP (could have in-window edits)
             {"id": 2, "created_at": "2026-04-27T21:00:00Z", "open": True, "tags": {"hashtags": "#hotosm-pre-open"}},
-            # Created after window, still open → drop (no possible in-window edits)
+            # Created past window_end, still open: KEEP so the next tick (which resumes
+            # past this diff) doesn't have to refetch it later.
             {"id": 3, "created_at": "2026-04-27T22:00:00Z", "open": True, "tags": {"hashtags": "#hotosm-post-open"}},
         ],
     )
     h = ChangesetHandler(changeset_config)
     h.apply_file(str(p))
-    assert set(h.changesets.keys()) == {1, 2}
+    assert set(h.changesets.keys()) == {1, 2, 3}
 
 
 def test_changeset_handler_window_filter_absent_keeps_everything(tmp_path, changeset_config):
@@ -488,7 +488,7 @@ def test_changefile_handler_drops_data_outside_window(osc_factory, changefile_co
     changefile_config["start_date_utc"] = dt.datetime(2026, 4, 1, tzinfo=dt.UTC)
     changefile_config["end_date_utc"] = dt.datetime(2026, 4, 2, tzinfo=dt.UTC)
 
-    # Without an explicit timestamp, osmium's apply_file uses 1970 — outside our window.
+    # Without an explicit timestamp, osmium's apply_file uses 1970, outside our window.
     osc = osc_factory(
         "003.osc",
         [("node", {"id": 1, "version": 1, "uid": 10, "user": "alice", "changeset": 1, "tags": {"amenity": "cafe"}})],
@@ -613,11 +613,11 @@ def test_changefile_handler_hashtags_and_users_intersect(osc_factory, changefile
     osc = osc_factory(
         "intersect.osc",
         [
-            # changeset 1 by alice — kept (in valid_changesets AND in whitelist)
+            # changeset 1 by alice, kept (in valid_changesets AND in whitelist)
             ("node", {"id": 1, "version": 1, "uid": 10, "user": "alice", "changeset": 1, "tags": {"amenity": "cafe"}}),
-            # changeset 1 by bob — dropped (in valid_changesets but NOT in whitelist)
+            # changeset 1 by bob, dropped (in valid_changesets but NOT in whitelist)
             ("node", {"id": 2, "version": 1, "uid": 20, "user": "bob", "changeset": 1, "tags": {"amenity": "bar"}}),
-            # changeset 3 by alice — dropped (in whitelist but NOT in valid_changesets)
+            # changeset 3 by alice, dropped (in whitelist but NOT in valid_changesets)
             ("node", {"id": 3, "version": 1, "uid": 10, "user": "alice", "changeset": 3, "tags": {"amenity": "shop"}}),
         ],
     )
@@ -645,7 +645,7 @@ def test_changefile_handler_empty_valid_changesets_drops_everything(osc_factory,
 
 
 def test_changefile_handler_none_valid_changesets_means_no_filter(osc_factory, changefile_config):
-    """None means 'no filter active' — collect everything that passes other filters."""
+    """None means 'no filter active', collect everything that passes other filters."""
     osc = osc_factory(
         "nofilter.osc",
         [

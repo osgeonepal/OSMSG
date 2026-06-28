@@ -86,6 +86,62 @@ def _open_db(tmp_path):
     return conn
 
 
+def test_pipeline_state_last_ts_is_seq_aligned(tmp_path, monkeypatch):
+    """state.last_ts is the seq_ts of last_seq so the next tick's lower-bound filter
+    aligns with the seq boundary."""
+    import datetime as _dt
+
+    import osmsg.pipeline as pipeline_mod
+    from osmsg.db.schema import get_state
+    from osmsg.pipeline import RunConfig, run
+
+    fake_server_ts = _dt.datetime(2026, 5, 1, 12, 0, tzinfo=_dt.UTC)
+    seq_ts = _dt.datetime(2026, 5, 1, 11, 35, tzinfo=_dt.UTC)  # explicitly different from cfg.end_date
+
+    def fake_changefile_download_urls(_start, _end, _base, *, resume_seq=None, cs_ts=None):
+        return (["https://fake/101.osc.gz"], fake_server_ts, 101, 101, "u1", "u2")
+
+    monkeypatch.setattr(pipeline_mod, "changefile_download_urls", fake_changefile_download_urls)
+    monkeypatch.setattr(pipeline_mod, "_download_all", lambda *a, **kw: None)
+    monkeypatch.setattr(pipeline_mod, "_process_all", lambda *a, **kw: None)
+    monkeypatch.setattr(pipeline_mod.dbmod, "merge_parquet_files", lambda *a, **kw: None)
+    monkeypatch.setattr(pipeline_mod, "changefile_seq_timestamp", lambda _base, _seq: seq_ts)
+    monkeypatch.setattr(
+        pipeline_mod, "user_stats", lambda *a, **kw: [{"uid": 1, "name": "x", "map_changes": 1, "rank": 1}]
+    )
+    monkeypatch.setattr(pipeline_mod, "to_parquet", lambda rows, path: path)
+
+    cfg = RunConfig(
+        name="t",
+        urls=["https://fake-source"],
+        url_explicit=True,
+        start_date=_dt.datetime(2026, 5, 1, 11, 0, tzinfo=_dt.UTC),
+        end_date=_dt.datetime(2026, 5, 1, 11, 30, tzinfo=_dt.UTC),  # explicit end != seq_ts
+        output_dir=tmp_path,
+        cache_dir=tmp_path / "cache",
+        formats=["parquet"],
+        changeset=False,
+        tag_mode="none",
+        history_mode="off",  # this test exercises the live state-alignment path only
+    )
+    run(cfg)
+
+    conn = duckdb.connect(str(tmp_path / "t.duckdb"))
+    state = get_state(conn, "https://fake-source")
+    conn.close()
+    assert state is not None
+    state_last_ts = state["last_ts"]
+    if state_last_ts.tzinfo is None:
+        state_last_ts = state_last_ts.replace(tzinfo=dt.UTC)
+    else:
+        state_last_ts = state_last_ts.astimezone(dt.UTC)
+    assert state_last_ts == seq_ts, (
+        f"state.last_ts must be seq_ts of last_seq ({seq_ts}); got {state_last_ts}. "
+        "If it equals cfg.end_date instead, the next tick's lower-bound filter is mis-aligned "
+        "with the seq boundary and edits in the boundary diff are silently lost."
+    )
+
+
 def test_resolve_url_starts_no_update_uses_cfg_start(tmp_path):
     conn = _open_db(tmp_path)
     start = dt.datetime(2026, 4, 1, tzinfo=dt.UTC)
@@ -114,7 +170,7 @@ def test_resolve_url_starts_update_reads_each_url_state_row(tmp_path):
 
 
 def test_resolve_url_starts_update_resume_seq_is_last_seq_plus_one(tmp_path):
-    """--update must resume at last_seq + 1 — no overlap, no gap, no backward pad."""
+    """--update must resume at last_seq + 1, no overlap, no gap, no backward pad."""
     conn = _open_db(tmp_path)
     ts = dt.datetime(2026, 5, 1, tzinfo=dt.UTC)
     upsert_state(conn, source_url="https://planet", last_seq=12345, last_ts=ts, updated_at=ts)
@@ -277,7 +333,7 @@ def test_auto_switch_suppressed_by_url_explicit():
 
 
 def test_auto_switch_suppressed_by_update():
-    """--update must never auto-switch — cross-URL replay would double-count via (seq_id, changeset_id)."""
+    """--update must never auto-switch, cross-URL replay would double-count via (seq_id, changeset_id)."""
     cfg = RunConfig(urls=[SHORTCUTS["minute"]], update=True)
     _auto_switch_replication(cfg, dt.timedelta(days=30))
     assert cfg.urls == [SHORTCUTS["minute"]]

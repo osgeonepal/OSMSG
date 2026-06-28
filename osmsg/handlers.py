@@ -32,23 +32,15 @@ class ChangesetHandler(osmium.SimpleHandler):
             return
         cfg = self.config
 
-        # Drop padding-pulled changesets that don't overlap the window — otherwise
-        # attach_metadata leaks their hashtags onto users with in-window edits.
-        # `c.open` gate is required: osmium uses 1970 as the closed_at sentinel.
+        # Drop closed-before-window changesets so attach_metadata can't leak their
+        # hashtags onto in-window users.
         start = cfg.get("window_start_utc")
-        end = cfg.get("window_end_utc")
-        if start is not None and end is not None:
-            created = c.created_at
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=dt.UTC)
-            if created >= end:
+        if start is not None and not c.open:
+            closed = c.closed_at
+            if closed.tzinfo is None:
+                closed = closed.replace(tzinfo=dt.UTC)
+            if closed <= start:
                 return
-            if not c.open:
-                closed = c.closed_at
-                if closed.tzinfo is None:
-                    closed = closed.replace(tzinfo=dt.UTC)
-                if closed <= start:
-                    return
 
         if self._geom is not None:
             if not c.bounds.valid():
@@ -64,7 +56,7 @@ class ChangesetHandler(osmium.SimpleHandler):
 
         keep = bool(cfg["changeset_meta"] and not cfg["hashtags"])
         # Some editors only fill the `hashtags` tag (comment stays generic); checking
-        # comment alone silently drops those. Tokenize via regex on both — real data
+        # comment alone silently drops those. Tokenize via regex on both, real data
         # mixes `;`, space, and comma as separators inside `hashtags`.
         comment = c.tags.get("comment", "")
         hashtags_field = c.tags.get("hashtags", "")
@@ -119,7 +111,6 @@ class ChangefileHandler(osmium.SimpleHandler):
         super().__init__()
         self.config = config
         self.start = config["start_date_utc"]
-        self.end = config["end_date_utc"]
         self.seq_id = sequence_id
         # None == no filter; empty set == filter matched nothing (collect nothing).
         self.valid_changesets = valid_changesets
@@ -188,15 +179,20 @@ class ChangefileHandler(osmium.SimpleHandler):
                 if track_length and k in length_keys:
                     tv.add_length(len_m)
 
+    def _in_window(self, ts) -> bool:
+        # Lower-bound only; disjoint coverage between ticks comes from the seq boundary
+        # (next tick resumes at last_seq+1, with state.last_ts = state_ts(last_seq)).
+        return ts >= self.start
+
     def node(self, n) -> None:
-        if not (self.start <= n.timestamp < self.end):
+        if not self._in_window(n.timestamp):
             return
         if not self._should_collect(n.user, n.changeset):
             return
         self._accumulate(n.uid, n.user, n.changeset, 0 if n.deleted else n.version, n.tags, "nodes")
 
     def way(self, w) -> None:
-        if not (self.start <= w.timestamp < self.end):
+        if not self._in_window(w.timestamp):
             return
         if not self._should_collect(w.user, w.changeset):
             return
@@ -204,7 +200,7 @@ class ChangefileHandler(osmium.SimpleHandler):
         self._accumulate(w.uid, w.user, w.changeset, 0 if w.deleted else w.version, w.tags, "ways", nodes)
 
     def relation(self, r) -> None:
-        if not (self.start <= r.timestamp < self.end):
+        if not self._in_window(r.timestamp):
             return
         if not self._should_collect(r.user, r.changeset):
             return

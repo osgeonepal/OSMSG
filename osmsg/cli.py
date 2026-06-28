@@ -1,6 +1,6 @@
 """Typer-based CLI for osmsg.
 
-UTC throughout — no display timezone. Outputs default to parquet (queryable from
+UTC throughout, no display timezone. Outputs default to parquet (queryable from
 disk by DuckDB / polars / pandas). Other formats: csv, json, markdown, psql.
 """
 
@@ -24,6 +24,7 @@ from .exceptions import (
     OsmsgError,
     UnknownRegionError,
 )
+from .maintain.cli import maintain_app
 from .pipeline import RunConfig, run
 from .ui import console, error, info, render_table, warn
 
@@ -36,6 +37,7 @@ app = typer.Typer(
     no_args_is_help=False,
     help="OpenStreetMap stats generator. Parquet-first, OAuth 2.0, UTC-only.",
 )
+app.add_typer(maintain_app, name="maintain")
 
 
 class Period(StrEnum):
@@ -104,9 +106,10 @@ def _period_range(period: Period) -> tuple[dt.datetime, dt.datetime]:
     raise ValueError(period)
 
 
-@app.command()
+@app.callback(invoke_without_command=True)
 @use_yaml_config(param_name="config", param_help="YAML config file (CLI flags override its values).")
 def main(
+    ctx: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option("--version", callback=_version_callback, is_eager=True, help="Print version and exit."),
@@ -147,7 +150,7 @@ def main(
     ] = None,
     workers: Annotated[
         int | None,
-        typer.Option(envvar="OSMSG_WORKERS", help="Parallel workers (default: cpu count)."),
+        typer.Option(envvar="OSMSG_WORKERS", help="Parallel parse workers (default: cpu count)."),
     ] = None,
     rows: Annotated[
         int | None,
@@ -215,6 +218,15 @@ def main(
         str | None,
         typer.Option("--psql-dsn", envvar="OSMSG_PSQL_DSN", help="libpq DSN for --format psql."),
     ] = None,
+    psql_bulk: Annotated[
+        bool,
+        typer.Option(
+            "--psql-bulk",
+            envvar="OSMSG_PSQL_BULK",
+            help="Faster one-time psql load: drop secondary indexes and foreign keys during the push "
+            "and rebuild them after. Use for a full history import, not for incremental --update.",
+        ),
+    ] = False,
     changeset_pad_hours: Annotated[
         int,
         typer.Option(
@@ -226,12 +238,75 @@ def main(
             max=48,
         ),
     ] = 1,
+    history: Annotated[
+        bool,
+        typer.Option(
+            "--history/--no-history",
+            envvar="OSMSG_HISTORY",
+            help="Serve covered months from the published parquet (HuggingFace) and only download the "
+            "recent tail. Falls back to the live diff path if unavailable. Ignored by --update.",
+        ),
+    ] = True,
+    history_url: Annotated[
+        str,
+        typer.Option(
+            "--history-url",
+            envvar="OSMSG_HISTORY_URL",
+            help="Base URL of the published history dataset.",
+        ),
+    ] = "hf://datasets/kshitijrajsharma/osmsg-history",
+    insert: Annotated[
+        bool,
+        typer.Option(
+            "--insert",
+            help="Load history into the store and seed resume state, then exit. No window loads the "
+            "whole published history; --start/--end loads a slice. Follow with --update to catch up.",
+        ),
+    ] = False,
+    osh_file: Annotated[
+        str | None,
+        typer.Option("--osh-file", help="Insert from a local .osh.pbf instead of the published dataset."),
+    ] = None,
+    changeset_file: Annotated[
+        str | None,
+        typer.Option("--changeset-file", help="Changeset dump (.osm.bz2) paired with --osh-file."),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            help="Recompute even if <name>.duckdb already holds this exact query; otherwise a rerun "
+            "that only changes the output format re-exports from the existing store.",
+        ),
+    ] = False,
 ) -> None:
-    """Run osmsg."""
+    """Run osmsg. With no subcommand this generates stats (or loads history with --insert)."""
+    if ctx.invoked_subcommand is not None:
+        return
     if formats is None:
         formats = [Format.parquet]
+    if psql_dsn and Format.psql not in formats:
+        formats.append(Format.psql)
     if sum(1 for x in (start, last, days) if x) > 1:
-        error("--start, --last, and --days are mutually exclusive — pick one.")
+        error("--start, --last, and --days are mutually exclusive, pick one.")
+        raise typer.Exit(code=2)
+    if update and any(x is not None for x in (start, end, last, days)):
+        error("--update resumes from prior state and runs to head; it ignores --start/--end/--last/--days.")
+        raise typer.Exit(code=2)
+    if insert and update:
+        error("--insert and --update are mutually exclusive; insert first, then update.")
+        raise typer.Exit(code=2)
+    if insert and (last is not None or days is not None):
+        error("--insert takes --start/--end (or no window), not --last/--days.")
+        raise typer.Exit(code=2)
+    if (osh_file is None) != (changeset_file is None):
+        error("--osh-file and --changeset-file must be given together.")
+        raise typer.Exit(code=2)
+    if osh_file and not insert:
+        error("--osh-file/--changeset-file are only valid with --insert.")
+        raise typer.Exit(code=2)
+    if psql_bulk and update:
+        error("--psql-bulk is for a one-time full load (drops indexes/keys); do not use it with --update.")
         raise typer.Exit(code=2)
     if Format.psql in formats and not psql_dsn:
         error("-f psql requires --psql-dsn (libpq connection string, e.g. 'host=localhost dbname=osm user=osm').")
@@ -264,7 +339,14 @@ def main(
         osm_username=username,
         osm_password=_read_password_stdin() if password_stdin else None,
         psql_dsn=psql_dsn,
+        psql_bulk=psql_bulk,
         changeset_pad_hours=changeset_pad_hours,
+        history_mode="auto" if history else "off",
+        history_url=history_url,
+        insert=insert,
+        osh_file=osh_file,
+        changeset_file=changeset_file,
+        overwrite=overwrite,
     )
 
     if last is not None:
@@ -296,6 +378,13 @@ def main(
     except OsmsgError as exc:
         error(str(exc))
         raise typer.Exit(code=2) from exc
+
+    if insert:
+        info(f"insert complete: {result['rows']:,} history changeset rows loaded.")
+        for label, path in (result.get("files") or {}).items():
+            console.print(f"[green]✓[/green] {label}: [bold]{path}[/bold]")
+        console.print("Next: [bold]osmsg --update[/bold] to catch up to now.")
+        return
 
     rows_data = result.get("rows_data") or []
     display_n = min(rows or 20, len(rows_data))

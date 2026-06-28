@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 USER_AGENT = "osmsg"
-DEFAULT_TIMEOUT = (10, 60)  # (connect, read) seconds
+DEFAULT_TIMEOUT = (30, 120)  # (connect, read) seconds
 
 
 class _TimeoutSession(requests.Session):
@@ -26,10 +26,14 @@ def make_session() -> requests.Session:
     """Fresh session with the standard timeout + retry policy (use when a flow needs its own cookie jar)."""
     s = _TimeoutSession()
     retry = Retry(
-        total=5,
-        backoff_factor=0.5,
+        total=10,
+        connect=10,
+        read=10,
+        backoff_factor=1.0,
+        backoff_max=120,
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=frozenset({"GET", "POST", "HEAD"}),
+        respect_retry_after_header=True,
     )
     adapter = HTTPAdapter(max_retries=retry, pool_maxsize=32)
     s.mount("https://", adapter)

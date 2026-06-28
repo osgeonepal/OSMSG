@@ -1,0 +1,56 @@
+{% set name = "osmsg" %}
+{% set version = "1.1.2" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  url: https://pypi.org/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  sha256: 8406e438dee0670af0f7379ce8d9c71fd6e5ecc29e1f6ad691045ebde64f9aac
+
+build:
+  noarch: python  # osmsg is pure Python; the native code lives in its dependencies
+  number: 0
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  entry_points:
+    - osmsg = osmsg.cli:app
+
+requirements:
+  host:
+    - python >=3.11
+    - pip
+    - uv-build >=0.5.15,<0.9
+  run:
+    - python >=3.11
+    - pyosmium >=4.3.1          # PyPI 'osmium' is 'pyosmium' on conda-forge
+    - python-duckdb >=1.5.2     # PyPI 'duckdb' is 'python-duckdb' on conda-forge
+    - pyarrow >=24.0.0
+    - shapely >=2.1.2
+    - pydantic >=2.13.3
+    - typer >=0.25.0
+    - typer-config >=1.5.1
+    - pyyaml                    # typer-config[yaml] extra
+    - requests >=2.32.5
+    - platformdirs >=4.5.1
+    - python-dotenv >=1.2.2
+    - pytz >=2024.1
+    - rich >=13.0
+
+test:
+  imports:
+    - osmsg
+  commands:
+    - osmsg --version
+
+about:
+  home: https://github.com/osgeonepal/osmsg
+  license: MIT
+  license_file: LICENSE
+  summary: "OpenStreetMap Stats Generator: per-user node/way/relation create/modify/delete counts."
+  doc_url: https://github.com/osgeonepal/osmsg
+  dev_url: https://github.com/osgeonepal/osmsg
+
+extra:
+  recipe-maintainers:
+    - kshitijrajsharma

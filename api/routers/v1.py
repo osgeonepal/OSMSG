@@ -93,7 +93,7 @@ class StatsController(Controller):
             str,
             Parameter(description="Tag aggregation: keys (default compact totals) or all (key/value details)."),
         ] = "keys",
-        limit: Annotated[int, Parameter(ge=1, le=1000, description="Page size (1–1000).")] = 100,
+        limit: Annotated[int, Parameter(ge=1, le=1000, description="Page size (1 to 1000).")] = 100,
         offset: Annotated[int, Parameter(ge=0, description="Page offset.")] = 0,
     ) -> UserStatsResponse:
         start, end = resolve_optional_window(start, end)

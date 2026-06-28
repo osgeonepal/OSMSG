@@ -25,7 +25,7 @@ class GeofabrikAuthError(OsmsgError):
 
 
 class NoDataFoundError(Exception):
-    """Empty range — info condition, not a failure (CLI exits 0). Not an OsmsgError on purpose."""
+    """Empty range, info condition, not a failure (CLI exits 0). Not an OsmsgError on purpose."""
 
 
 __all__ = [

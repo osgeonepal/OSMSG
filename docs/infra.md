@@ -43,18 +43,18 @@ $EDITOR infra/.env
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `OSMSG_DOMAIN` | `localhost` | Your domain — enables automatic HTTPS via Caddy |
+| `OSMSG_DOMAIN` | `localhost` | Your domain, enables automatic HTTPS via Caddy |
 | `OSMSG_SCHEDULE` | `*/2 * * * *` | supercronic cron expression |
 | `OSMSG_BOOTSTRAP` | `hour` | First-run window: `hour`/`day`/`week`/`month`/`year` |
 | `OSMSG_BOOTSTRAP_DAYS` | _unset_ | Exact day count for first run (alternative to `OSMSG_BOOTSTRAP`) |
 | `OSM_USERNAME` | _unset_ | OSM account username (required for Geofabrik country replication) |
 | `OSM_PASSWORD` | _unset_ | OSM account password (required for Geofabrik country replication) |
-| `OSMSG_EXTRA_ARGS` | _see example_ | osmsg args applied on every tick — country, format, tags, boundary, etc. |
+| `OSMSG_EXTRA_ARGS` | _see example_ | osmsg args applied on every tick (country, format, tags, boundary, etc.) |
 
-`OSMSG_EXTRA_ARGS` runs on every tick. Do not put `--last`, `--days`, or `--update` here —
+`OSMSG_EXTRA_ARGS` runs on every tick. Do not put `--last`, `--days`, or `--update` here;
 tick adds those automatically based on whether state exists.
 
-Geofabrik sub-daily replication uses your OSM credentials directly — no browser opt-in required.
+Geofabrik sub-daily replication uses your OSM credentials directly, no browser opt-in required.
 
 ### Start
 
@@ -75,7 +75,7 @@ docker compose pull && docker compose up -d
 
 ## Run as a systemd service
 
-Only the `infra/` directory needs to be on the server — no source code or build tools required.
+Only the `infra/` directory needs to be on the server; no source code or build tools required.
 
 **1. Place files:**
 
@@ -85,7 +85,7 @@ cp infra/docker-compose.yml infra/Caddyfile infra/osmsg.service /opt/osmsg/infra
 cp infra/.env.example /opt/osmsg/infra/.env
 $EDITOR /opt/osmsg/infra/.env
 
-# The pgdata Docker volume binds to /mnt — create the directory first
+# The pgdata Docker volume binds to /mnt, create the directory first
 mkdir -p /mnt/osmsg/pgdata
 ```
 

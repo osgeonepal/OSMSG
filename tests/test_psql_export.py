@@ -36,7 +36,7 @@ def test_pg_schema_uses_jsonb_for_tag_stats():
 
 
 def test_pg_schema_state_is_single_row_per_source():
-    """`state` is keyed by source_url alone — one row per replication source, ever.
+    """`state` is keyed by source_url alone, one row per replication source, ever.
     The PSQL exporter UPSERTs on conflict so every osmsg run keeps PG in sync."""
     assert "source_url  TEXT PRIMARY KEY" in PG_SCHEMA
     assert "BIGSERIAL" not in PG_SCHEMA  # no synthetic ids needed
@@ -44,7 +44,7 @@ def test_pg_schema_state_is_single_row_per_source():
 
 def test_pg_schema_statements_each_parse_with_postgres_extension():
     """Each individual CREATE statement is well-formed enough that the postgres
-    extension's parser would accept it — we use DuckDB's own parser as an
+    extension's parser would accept it, we use DuckDB's own parser as an
     approximation (DuckDB's CREATE TABLE syntax is compatible)."""
     duckdb_clone = (
         PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
@@ -78,7 +78,7 @@ def _assert_user_stats_match(actual: list[dict], expected: dict[str, dict[str, i
 
 
 def test_duckdb_user_stats_match_seed_data(fresh_db, populated_db_factory):
-    """Anchor for EXPECTED_USER_STATS — if it drifts, every other roundtrip test silently lies."""
+    """Anchor for EXPECTED_USER_STATS, if it drifts, every other roundtrip test silently lies."""
     rows = user_stats(populated_db_factory(fresh_db))
     _assert_user_stats_match(rows, EXPECTED_USER_STATS)
 
@@ -396,7 +396,7 @@ def test_to_psql_refuses_when_pg_has_data_from_a_different_source(fresh_db, popu
 @pytest.mark.network
 @pytest.mark.skipif(not os.environ.get("OSMSG_PG_DSN"), reason="OSMSG_PG_DSN not set; live PG push not exercised")
 def test_to_psql_allows_repush_from_same_source(fresh_db, populated_db_factory):
-    """A second push from the SAME source URL is fine — common --update path."""
+    """A second push from the SAME source URL is fine, common --update path."""
     import datetime as _dt
 
     dsn = os.environ["OSMSG_PG_DSN"]
@@ -422,3 +422,52 @@ def test_to_psql_allows_repush_from_same_source(fresh_db, populated_db_factory):
     )
     to_psql(populated, dsn)
     to_psql(populated, dsn)
+
+
+@pytest.mark.network
+@pytest.mark.skipif(not os.environ.get("OSMSG_PG_DSN"), reason="OSMSG_PG_DSN not set; live PG push not exercised")
+def test_to_psql_bulk_load_rebuilds_indexes_and_keys(fresh_db, populated_db_factory):
+    """bulk_load drops secondary indexes + FKs for the push, then rebuilds them; data and
+    referential integrity must be intact afterwards."""
+    dsn = os.environ["OSMSG_PG_DSN"]
+    safe_dsn = dsn.replace("'", "''")
+    populated = populated_db_factory(fresh_db)
+    populated.execute("INSTALL postgres")
+    populated.execute("LOAD postgres")
+    populated.execute(f"ATTACH '{safe_dsn}' AS pg_w (TYPE postgres)")
+    try:
+        for stmt in PG_SCHEMA.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                populated.execute(f"CALL postgres_execute('pg_w', $${stmt}$$)")
+        for table in ("changeset_stats", "changesets", "users", "state"):
+            populated.execute(f"CALL postgres_execute('pg_w', $$DELETE FROM {table}$$)")
+    finally:
+        populated.execute("DETACH pg_w")
+
+    to_psql(populated, dsn, bulk_load=True)
+
+    check = duckdb.connect(":memory:")
+    check.execute("INSTALL postgres")
+    check.execute("LOAD postgres")
+    check.execute(f"ATTACH '{safe_dsn}' AS pg (TYPE postgres, READ_ONLY)")
+    try:
+        stats = check.execute("SELECT count(*) FROM pg.changeset_stats").fetchone()[0]
+        orphans = check.execute(
+            "SELECT count(*) FROM pg.changeset_stats s "
+            "LEFT JOIN pg.changesets c ON s.changeset_id = c.changeset_id WHERE c.changeset_id IS NULL"
+        ).fetchone()[0]
+        # Count foreign keys on the Postgres side (regclass is a Postgres type DuckDB cannot parse).
+        fks = check.execute(
+            "SELECT count(*) FROM postgres_query('pg', "
+            "'SELECT 1 FROM information_schema.table_constraints "
+            "WHERE constraint_type = ''FOREIGN KEY'' "
+            "AND table_name IN (''changesets'', ''changeset_stats'')')"
+        ).fetchone()[0]
+    finally:
+        check.execute("DETACH pg")
+        check.close()
+
+    assert stats > 0  # data loaded
+    assert orphans == 0  # FK integrity holds after rebuild
+    assert fks == 3  # the three foreign keys were recreated

@@ -750,7 +750,7 @@ def test_live_api_date_filter_with_no_matches_returns_empty_not_all(live_api_cli
 
 
 def test_user_stats_sql_no_filter_skips_changesets_join():
-    """No-filter path must not JOIN the changesets table — orphan stats would be dropped."""
+    """No-filter path must not JOIN the changesets table, orphan stats would be dropped."""
     from api.queries import _user_stats_sql
 
     sql = _user_stats_sql(filter_dates=False, filter_hashtags=False, tag_mode="none")

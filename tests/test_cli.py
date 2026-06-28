@@ -1,6 +1,6 @@
 """typer CliRunner sanity tests for major flag combinations.
 
-These don't exercise the OSM network — they verify the parser wiring, period
+These don't exercise the OSM network, they verify the parser wiring, period
 resolution, mutual-exclusion checks, and error paths.
 """
 
@@ -85,6 +85,16 @@ def test_no_dates_no_update_errors_out():
     result = runner.invoke(app, [])
     # Without --start / --last / --days / --update, pipeline raises SystemExit.
     assert result.exit_code != 0
+
+
+def test_update_rejects_explicit_window():
+    """--update resumes from state and runs to head; explicit window flags must error out
+    so a desync between state seq and the requested timestamp can't reintroduce stat loss."""
+    for extra in (["--end", "2026-01-01"], ["--start", "2026-01-01"], ["--last", "hour"], ["--days", "1"]):
+        result = runner.invoke(app, ["--update", *extra])
+        assert result.exit_code == 2, f"--update {extra} should be rejected; got {result.exit_code}"
+        plain = click.unstyle(result.stderr) if result.stderr else click.unstyle(result.stdout)
+        assert "update" in plain.lower(), f"error message must mention --update; got: {plain}"
 
 
 def test_invalid_period_value_rejected():

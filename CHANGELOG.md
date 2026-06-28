@@ -1,3 +1,51 @@
+## v1.2.5 (2026-06-25)
+
+### Fix
+
+- **gui**: fix the concurrent download issue add workers to gui
+
+## v1.2.4 (2026-06-25)
+
+### Fix
+
+- **download**: fix the concurrency on osmsg
+
+## v1.2.3 (2026-06-24)
+
+### Fix
+
+- **gui**: windows
+
+## v1.2.2 (2026-06-24)
+
+### Fix
+
+- **gui**: fixes gui for windows
+
+## v1.2.1 (2026-06-24)
+
+### Fix
+
+- **chore**: cleanup and adds progress bar in the hf download
+
+## v1.2.0 (2026-06-24)
+
+### Feat
+
+- **hisotry**: add osm hisotry for the stats
+
+### Fix
+
+- **build**: add build for the multiprocessing
+- **precommit**: fixes precommit issue in conda receipe
+
+## v1.1.2 (2026-06-04)
+
+### Fix
+
+- **replication**: fix last sequence on update missing stats
+- **update**: fix hte update bug on tick
+
 ## v1.1.1 (2026-05-21)
 
 ### Fix

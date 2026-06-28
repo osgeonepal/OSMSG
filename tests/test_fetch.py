@@ -83,7 +83,7 @@ def test_existing_decompressed_file_short_circuits(tmp_path: Path, fake_session)
     raw_path = fetch.file_path_for(url, "changefiles", tmp_path).with_suffix("")
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path.write_bytes(b"already cached")
-    # Note: fake_session install NOT called for this URL — fake_get would AssertionError if hit.
+    # Note: fake_session install NOT called for this URL, fake_get would AssertionError if hit.
 
     out = fetch.download_osm_file(url, mode="changefiles", cache_dir=tmp_path)
     assert out.read_bytes() == b"already cached"
@@ -96,7 +96,7 @@ def test_download_failure_leaves_no_partial(tmp_path: Path, monkeypatch):
 
     class _BrokenResponse:
         def __init__(self):
-            # Not valid gzip — GzipFile will raise on read.
+            # Not valid gzip, GzipFile will raise on read.
             self.raw = io.BytesIO(b"not gzip data")
             self.raw.decode_content = False
 

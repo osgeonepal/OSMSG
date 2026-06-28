@@ -106,7 +106,7 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
     _quarantine_corrupt(parquet_dir)
 
     def pattern(name: str) -> str:
-        # read_parquet() takes a literal — escape so quoted paths can't break out.
+        # read_parquet() takes a literal, escape so quoted paths can't break out.
         return _sql_escape((parquet_dir / f"temp_*_{name}_*.parquet").as_posix())
 
     conn.execute("BEGIN")

@@ -1,4 +1,4 @@
-"""OSM replication URL helpers — planet changefiles + planet changesets."""
+"""OSM replication URL helpers, planet changefiles + planet changesets."""
 
 from __future__ import annotations
 
@@ -34,14 +34,25 @@ def seq_to_timestamp(state_url: str) -> datetime:
     return datetime.strptime(raw, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
+def changefile_seq_timestamp(base_url: str, seq: int) -> datetime:
+    """Timestamp of a changefile-replication seq (the diff's `state.txt` `timestamp=` line)."""
+    return seq_to_timestamp(ReplicationServer(base_url).get_state_url(seq))
+
+
 def changefile_download_urls(
     start_date: datetime | None,
     end_date: datetime,
     base_url: str,
     *,
     resume_seq: int | None = None,
+    cs_ts: datetime | None = None,
 ) -> tuple[list[str], datetime, int, int, str, str]:
-    """resume_seq starts exactly there (skipping the timestamp lookup + backward pad used on first runs)."""
+    """Resolve [start_seq, last_seq] for the time range, plus the URL list to fetch.
+
+    resume_seq, when given, is used verbatim (no backward pad). cs_ts gates the
+    upper bound on resume ticks: last_seq stays behind cs_ts so every (seq, cs) row
+    written has its parent changeset in place.
+    """
     repl = ReplicationServer(base_url)
 
     if resume_seq is not None:
@@ -75,15 +86,19 @@ def changefile_download_urls(
         end_seq = repl.timestamp_to_sequence(end_date)
         if end_seq is None:
             raise OsmsgError(f"Could not resolve end_date {end_date}")
-        last_seq = end_seq
-        # Pad forwards so the last requested timestamp is fully covered by the diffs we fetch.
-        if "minute" in base_url:
-            adjust = int((seq_to_timestamp(repl.get_state_url(end_seq)) - end_date).total_seconds() / 60)
-            last_seq = last_seq + adjust + 60
-        else:
-            last_seq += 1
-        if last_seq >= server_seq:
-            last_seq = server_seq
+        # +1 only when end_seq's state_ts is strictly before end_date, since that is the
+        # only diff that can contain edits in (state_ts(end_seq), end_date].
+        end_seq_ts = seq_to_timestamp(repl.get_state_url(end_seq))
+        if end_seq_ts < end_date:
+            end_seq += 1
+        last_seq = min(end_seq, server_seq)
+
+    # Hold cf one diff behind cs when cs is the slower stream, so every (seq, cs) row
+    # written has a parent in `changesets` already.
+    if resume_seq is not None and cs_ts is not None:
+        target_ts = end_date if end_date else server_ts
+        if target_ts > cs_ts:
+            last_seq -= 1
 
     if seq >= last_seq:
         return [], server_ts, start_seq, last_seq, start_seq_url, repl.get_state_url(last_seq)
@@ -130,7 +145,7 @@ class ChangesetReplication:
     def timestamp_to_sequence(self, ts: datetime) -> int:
         cur_seq, last_run = self._state()
         wanted = int((ts - last_run).total_seconds() / 60) + cur_seq
-        return min(wanted, cur_seq)
+        return max(1, min(wanted, cur_seq))
 
     def sequence_to_timestamp(self, seq: int) -> datetime:
         txt = session.get(self.state_url(seq)).text
@@ -168,10 +183,8 @@ class ChangesetReplication:
             end_seq = self.timestamp_to_sequence(end_date)
             end_ts = self.sequence_to_timestamp(end_seq)
             if end_date > end_ts:
+                # Step to the diff covering end_date, plus one so edits at end_date land.
                 end_seq += int((end_date - end_ts).total_seconds() / 60) + 1
-                end_ts = self.sequence_to_timestamp(end_seq)
-            if end_ts > end_date:
-                end_seq += int((end_ts - end_date).total_seconds() / 60) + 60
             end_seq = min(end_seq, cur_seq)
 
         if start_seq >= end_seq:
