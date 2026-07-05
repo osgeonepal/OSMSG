@@ -8,10 +8,10 @@ services:
       POSTGRES_DB: osmsg
     command: >
       postgres
-      -c shared_buffers=128MB
-      -c effective_cache_size=256MB
-      -c work_mem=4MB
-      -c maintenance_work_mem=32MB
+      -c shared_buffers=256MB
+      -c effective_cache_size=768MB
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,10 +22,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.30"
-          memory: 300M
+          cpus: "0.60"
+          memory: 1024M
         reservations:
-          memory: 128M
+          memory: 256M
     restart: unless-stopped
 
   api:
@@ -38,8 +38,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.15"
-          memory: 128M
+          cpus: "0.30"
+          memory: 256M
         reservations:
           memory: 64M
     restart: unless-stopped
@@ -63,10 +63,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.50"
-          memory: 400M
+          cpus: "1.50"
+          memory: 1536M
         reservations:
-          memory: 128M
+          memory: 256M
     restart: unless-stopped
 
   caddy:
@@ -79,6 +79,7 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/osmsg-leaderboard:/srv/leaderboard:ro
       - caddy-data:/data
       - caddy-config:/config
     depends_on:
@@ -86,8 +87,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.10"
-          memory: 64M
+          cpus: "0.20"
+          memory: 96M
         reservations:
           memory: 32M
     restart: unless-stopped
@@ -100,6 +101,16 @@ volumes:
       o: bind
       device: /mnt/mnt/osmsg/pgdata
   osmsg-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/mnt/osmsg/data
   osmsg-cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/mnt/osmsg/cache
   caddy-data:
   caddy-config:

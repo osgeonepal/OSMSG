@@ -1,0 +1,15 @@
+[Unit]
+Description=osmsg monthly HuggingFace history dump
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/osmsg-maintain
+EnvironmentFile=/opt/osmsg-maintain/.env
+Environment=HOME=/root
+Environment=XDG_CACHE_HOME=/mnt/mnt/osmsg/cache
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/opt/osmsg-maintain/run-maintain.sh
+TimeoutStartSec=21600

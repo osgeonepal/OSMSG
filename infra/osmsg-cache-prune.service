@@ -1,0 +1,6 @@
+[Unit]
+Description=Prune osmsg replication cache older than 7 days
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/find /mnt/mnt/osmsg/cache -type f -mtime +7 -delete

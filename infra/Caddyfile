@@ -2,6 +2,13 @@
     email {$OSMSG_ACME_EMAIL}
 }
 
-{$OSMSG_DOMAIN:localhost} {
+{$OSMSG_FRONTEND_DOMAIN:localhost} {
+    root * /srv/leaderboard
+    encode gzip
+    try_files {path} {path}/ /index.html
+    file_server
+}
+
+{$OSMSG_API_DOMAIN:api.localhost} {
     reverse_proxy api:8000
 }
