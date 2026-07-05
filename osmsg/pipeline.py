@@ -400,6 +400,9 @@ def _store_fingerprint(conn: duckdb.DuckDBPyConnection, fingerprint: str) -> Non
     conn.execute("INSERT INTO osmsg_run_meta VALUES (?)", [fingerprint])
 
 
+_FILE_FORMATS = frozenset({"parquet", "csv", "json", "markdown"})
+
+
 def _finalize(
     cfg: RunConfig,
     conn: duckdb.DuckDBPyConnection,
@@ -418,18 +421,22 @@ def _finalize(
         raise NoDataFoundError("No stats produced for the requested time range.")
     _store_fingerprint(conn, fingerprint)
 
-    if cfg.changeset or cfg.hashtags:
-        attach_metadata(conn, rows)
-    if cfg.additional_tags or cfg.tag_mode != "none" or cfg.length_tags:
-        attach_tag_stats(
-            conn,
-            rows,
-            additional_tags=cfg.additional_tags,
-            tag_mode=cfg.tag_mode,
-            length_tags=cfg.length_tags,
-        )
-    if cfg.tm_stats:
-        rows = tm.enrich(rows)
+    # Per-user metadata/tag enrichment feeds only the file-format writers; a psql push writes the raw
+    # tables and never reads these rows. Skip it when no file format is requested, so a psql-only run
+    # never materializes every row's tag_stats JSON at once (multi-GB on a large store).
+    if _FILE_FORMATS & set(cfg.formats) or cfg.summary:
+        if cfg.changeset or cfg.hashtags:
+            attach_metadata(conn, rows)
+        if cfg.additional_tags or cfg.tag_mode != "none" or cfg.length_tags:
+            attach_tag_stats(
+                conn,
+                rows,
+                additional_tags=cfg.additional_tags,
+                tag_mode=cfg.tag_mode,
+                length_tags=cfg.length_tags,
+            )
+        if cfg.tm_stats:
+            rows = tm.enrich(rows)
 
     out = cfg.output_dir
     written: dict[str, str] = {}
