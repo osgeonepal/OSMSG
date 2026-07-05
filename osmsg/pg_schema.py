@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS changeset_stats (
     PRIMARY KEY (seq_id, changeset_id)
 );
 CREATE INDEX IF NOT EXISTS idx_changeset_stats_uid ON changeset_stats(uid);
+CREATE INDEX IF NOT EXISTS idx_changeset_stats_changeset_id ON changeset_stats(changeset_id);
 CREATE TABLE IF NOT EXISTS state (
     source_url  TEXT PRIMARY KEY,
     last_seq    BIGINT NOT NULL,

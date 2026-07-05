@@ -3,10 +3,18 @@
 }
 
 {$OSMSG_FRONTEND_DOMAIN:localhost} {
-    root * /srv/leaderboard
     encode gzip
-    try_files {path} {path}/ /index.html
-    file_server
+
+    @api path /api/* /health /docs /docs/* /schema /schema/*
+    handle @api {
+        reverse_proxy api:8000
+    }
+
+    handle {
+        root * /srv/leaderboard
+        try_files {path} {path}/ /index.html
+        file_server
+    }
 }
 
 {$OSMSG_API_DOMAIN:api.localhost} {

@@ -8,10 +8,10 @@ services:
       POSTGRES_DB: osmsg
     command: >
       postgres
-      -c shared_buffers=256MB
-      -c effective_cache_size=768MB
-      -c work_mem=8MB
-      -c maintenance_work_mem=64MB
+      -c shared_buffers=384MB
+      -c effective_cache_size=1024MB
+      -c work_mem=32MB
+      -c maintenance_work_mem=192MB
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -22,10 +22,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.60"
-          memory: 1024M
+          cpus: "2.0"
+          memory: 1536M
         reservations:
-          memory: 256M
+          memory: 512M
     restart: unless-stopped
 
   api:
