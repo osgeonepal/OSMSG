@@ -65,7 +65,7 @@ def test_streams_covered_aligned_and_bounded(monkeypatch, tmp_path):
     _run(urls, seqs, window, 3, cache, results)
 
     peak = 0
-    for url, seq in zip(urls, seqs):
+    for url, seq in zip(urls, seqs, strict=True):
         body = (results / f"r_{seq}").read_text()
         assert body.startswith(url + "|"), f"seq {seq} misaligned: {body}"
         assert "existed=True" in body, f"processed before download: {body}"
