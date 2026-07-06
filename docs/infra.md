@@ -1,145 +1,113 @@
 # Self-hosting osmsg
 
-This guide covers running osmsg continuously on a server.
+Runs osmsg continuously: Postgres store, REST API, replication worker, and Caddy for HTTPS plus the
+static leaderboard.
 
-## Two compose files
-
-| File | Purpose | Images |
-| --- | --- | --- |
-| `docker-compose.yml` | Local development | Built from source |
-| `infra/docker-compose.yml` | Production / server | Pulled from GHCR |
-
-The production compose adds Caddy for HTTPS termination and pulls pre-built images
-
-## Local development
-
-```bash
-docker compose up -d
-curl 'http://localhost:8000/health'
-```
-
-The API is available on port 8000 directly. No config needed: defaults to planet replication,
-`*/2 * * * *` schedule, bootstrap from last hour.
-
-## Production deployment
-
-### Stack
+## Stack
 
 | Service | Image | Role |
 | --- | --- | --- |
-| `db` | `postgres:17-alpine` | Persistent stats store |
-| `api` | `ghcr.io/osgeonepal/osmsg-api:latest` | Litestar REST API |
-| `worker` | `ghcr.io/osgeonepal/osmsg-worker:latest` | osmsg cron worker |
-| `caddy` | `caddy:2-alpine` | HTTPS reverse proxy |
+| `db` | `postgis/postgis:17-3.5-alpine` | Stats store |
+| `api` | `ghcr.io/osgeonepal/osmsg-api:latest` | REST API |
+| `worker` | `ghcr.io/osgeonepal/osmsg-worker:latest` | Replication worker |
+| `caddy` | `caddy:2-alpine` | HTTPS proxy: API + leaderboard |
 
-### Configuration
+Frontend and API use two subdomains: `OSMSG_FRONTEND_DOMAIN` and `OSMSG_API_DOMAIN`.
 
-Copy `infra/.env.example` and edit:
+## Disk
 
-```bash
-cp infra/.env.example infra/.env
-$EDITOR infra/.env
-```
-
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `OSMSG_DOMAIN` | `localhost` | Your domain, enables automatic HTTPS via Caddy |
-| `OSMSG_SCHEDULE` | `*/2 * * * *` | supercronic cron expression |
-| `OSMSG_BOOTSTRAP` | `hour` | First-run window: `hour`/`day`/`week`/`month`/`year` |
-| `OSMSG_BOOTSTRAP_DAYS` | _unset_ | Exact day count for first run (alternative to `OSMSG_BOOTSTRAP`) |
-| `OSM_USERNAME` | _unset_ | OSM account username (required for Geofabrik country replication) |
-| `OSM_PASSWORD` | _unset_ | OSM account password (required for Geofabrik country replication) |
-| `OSMSG_EXTRA_ARGS` | _see example_ | osmsg args applied on every tick (country, format, tags, boundary, etc.) |
-
-`OSMSG_EXTRA_ARGS` runs on every tick. Do not put `--last`, `--days`, or `--update` here;
-tick adds those automatically based on whether state exists.
-
-Geofabrik sub-daily replication uses your OSM credentials directly, no browser opt-in required.
-
-### Start
+Keep growing data off the root disk. Attach a block volume at `/mnt/mnt`; the three data volumes bind
+to it. Create the directories and swap before the first start:
 
 ```bash
-cd infra
-docker compose up -d
-curl 'http://localhost/health'
+sudo mkdir -p /mnt/mnt/osmsg/{pgdata,cache,data,maintain/work,maintain/out}
+sudo fallocate -l 4G /mnt/mnt/swapfile && sudo chmod 600 /mnt/mnt/swapfile
+sudo mkswap /mnt/mnt/swapfile && sudo swapon /mnt/mnt/swapfile
+echo '/mnt/mnt/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
 ```
 
-Set `OSMSG_DOMAIN` to your server's hostname for automatic HTTPS.
+## DNS
 
-### Update to latest images
-
-```bash
-cd infra
-docker compose pull && docker compose up -d
-```
-
-## Run as a systemd service
-
-Only the `infra/` directory needs to be on the server; no source code or build tools required.
-
-**1. Place files:**
-
-```bash
-mkdir -p /opt/osmsg/infra
-cp infra/docker-compose.yml infra/Caddyfile infra/osmsg.service /opt/osmsg/infra/
-cp infra/.env.example /opt/osmsg/infra/.env
-$EDITOR /opt/osmsg/infra/.env
-
-# The pgdata Docker volume binds to /mnt, create the directory first
-mkdir -p /mnt/osmsg/pgdata
-```
-
-**2. Install and enable:**
-
-```bash
-cp /opt/osmsg/infra/osmsg.service /etc/systemd/system/osmsg.service
-systemctl daemon-reload
-systemctl enable --now osmsg
-```
-
-**Useful commands:**
-
-```bash
-systemctl status osmsg
-journalctl -u osmsg -f       # follow logs from all containers
-systemctl restart osmsg      # pick up .env changes
-systemctl stop osmsg         # graceful shutdown
-```
-
-## Populate all-time stats (backfill)
-
-Run the worker once with a date range before starting the continuous service.
-The worker detects existing state and resumes with `--update` automatically on next ticks.
-
-**Nepal stats since 2012:**
-
-```bash
-cd infra
-docker compose up -d db
-
-docker compose run --rm worker python -m osmsg \
-    --name nepal \
-    --country nepal \
-    --start "2012-09-12" \
-    --end "2026-01-01" \
-    --format psql \
-    --psql-dsn "postgresql://osmsg:osmsg@db:5432/osmsg"
-
-docker compose up -d
-```
-
-**Last 90 days then keep refreshing:**
-
-```bash
-# Set OSMSG_EXTRA_ARGS with --days 90 for first run, then start normally
-OSMSG_EXTRA_ARGS="--name stats --output-dir /var/lib/osmsg --cache-dir /var/cache/osmsg --url minute --days 90 --format psql --psql-dsn postgresql://osmsg:osmsg@db:5432/osmsg" \
-  docker compose up -d
-```
-
-## API endpoints
+Point both subdomains at the server as `A` records. On Cloudflare, set them DNS-only (grey cloud) so
+Caddy's Let's Encrypt challenge reaches the host.
 
 ```text
-GET /
+osmsg.<domain>      A   <server-ip>
+api.osmsg.<domain>  A   <server-ip>
+```
+
+## Configure and deploy
+
+```bash
+cp infra/.env.example infra/.env && $EDITOR infra/.env   # set the two domains + ACME email
+sudo mkdir -p /opt/osmsg/infra
+sudo cp infra/docker-compose.yml infra/Caddyfile infra/osmsg.service infra/.env /opt/osmsg/infra/
+sudo git clone https://github.com/osgeonepal/osmsg-leaderboard.git /opt/osmsg-leaderboard
+sudo cp /opt/osmsg/infra/osmsg.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl enable --now osmsg
+```
+
+`OSMSG_EXTRA_ARGS` runs every tick. Do not put `--last`, `--days`, `--update`, or `--url` there: the
+worker adds `--update` and auto-selects granularity from the gap (day to hour to minute). Pinning
+`--url minute` over a large gap crawls tens of thousands of files and fills the disk.
+
+## Seed history, then follow live
+
+Seed the last published month into Postgres, then let the worker follow live. Use the worker's store
+params so resume state lines up.
+
+```bash
+cd /opt/osmsg/infra && docker compose up -d db
+docker compose run --rm --entrypoint osmsg worker \
+    --insert --start 2026-05-01 --end 2026-06-01 \
+    --name stats --output-dir /var/lib/osmsg --cache-dir /var/cache/osmsg \
+    --format psql --psql-dsn postgresql://osmsg:osmsg@db:5432/osmsg --all
+docker compose up -d
+```
+
+Manifest max month: `.../osmsg-history/resolve/main/manifest.json`.
+
+## Timers
+
+```bash
+sudo cp infra/osmsg-cache-prune.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now osmsg-cache-prune.timer
+```
+
+Monthly HuggingFace dump (`maintain month` needs `uv` + source, so it runs host-side):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
+sudo git clone https://github.com/osgeonepal/osmsg.git /opt/osmsg-maintain
+cd /opt/osmsg-maintain && sudo uv sync --no-dev
+sudo cp /opt/osmsg/infra/run-maintain.sh /opt/osmsg-maintain/
+echo 'HF_TOKEN=<write-token>' | sudo tee /opt/osmsg-maintain/.env && sudo chmod 600 /opt/osmsg-maintain/.env
+sudo cp infra/osmsg-maintain.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now osmsg-maintain.timer
+```
+
+`run-maintain.sh` keeps all scratch on the block volume. Publish a month by hand with
+`sudo systemctl start osmsg-maintain.service` (previous month) or pass a month:
+`sudo -E .../run-maintain.sh 2026-06`.
+
+## Operate
+
+```bash
+journalctl -u osmsg -f                        # container logs
+cd /opt/osmsg/infra && docker compose pull && docker compose up -d   # update images
+```
+
+Recover a full root disk (cache or images landed on root):
+
+```bash
+systemctl stop osmsg && cd /opt/osmsg/infra && docker compose down
+docker volume rm infra_osmsg-cache infra_osmsg-data   # pgdata is never removed
+docker image prune -af && docker builder prune -af
+```
+
+## API
+
+```text
 GET /health
 GET /api/v1/stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&tags=true|false][&tag_mode=keys|all][&limit=N][&offset=N]
 GET /api/v1/hashtag-stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&interval=day|week|month][&limit=N][&offset=N]

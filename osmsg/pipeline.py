@@ -7,6 +7,7 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import multiprocessing
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -399,6 +400,9 @@ def _store_fingerprint(conn: duckdb.DuckDBPyConnection, fingerprint: str) -> Non
     conn.execute("INSERT INTO osmsg_run_meta VALUES (?)", [fingerprint])
 
 
+_FILE_FORMATS = frozenset({"parquet", "csv", "json", "markdown"})
+
+
 def _finalize(
     cfg: RunConfig,
     conn: duckdb.DuckDBPyConnection,
@@ -417,18 +421,22 @@ def _finalize(
         raise NoDataFoundError("No stats produced for the requested time range.")
     _store_fingerprint(conn, fingerprint)
 
-    if cfg.changeset or cfg.hashtags:
-        attach_metadata(conn, rows)
-    if cfg.additional_tags or cfg.tag_mode != "none" or cfg.length_tags:
-        attach_tag_stats(
-            conn,
-            rows,
-            additional_tags=cfg.additional_tags,
-            tag_mode=cfg.tag_mode,
-            length_tags=cfg.length_tags,
-        )
-    if cfg.tm_stats:
-        rows = tm.enrich(rows)
+    # Per-user metadata/tag enrichment feeds only the file-format writers; a psql push writes the raw
+    # tables and never reads these rows. Skip it when no file format is requested, so a psql-only run
+    # never materializes every row's tag_stats JSON at once (multi-GB on a large store).
+    if _FILE_FORMATS & set(cfg.formats) or cfg.summary:
+        if cfg.changeset or cfg.hashtags:
+            attach_metadata(conn, rows)
+        if cfg.additional_tags or cfg.tag_mode != "none" or cfg.length_tags:
+            attach_tag_stats(
+                conn,
+                rows,
+                additional_tags=cfg.additional_tags,
+                tag_mode=cfg.tag_mode,
+                length_tags=cfg.length_tags,
+            )
+        if cfg.tm_stats:
+            rows = tm.enrich(rows)
 
     out = cfg.output_dir
     written: dict[str, str] = {}
@@ -543,49 +551,81 @@ def _processing_config(cfg: RunConfig, *, parquet_dir: Path, geom_wkt: str | Non
 _DOWNLOAD_WORKERS = 4
 
 
-def _download_all(
+def _stream_window(url: str) -> int:
+    """Cap on raw files held on disk at once, sized by file weight: planet day diffs are ~1 GB so
+    only a few fit; hour diffs are moderate; minute and changeset files are tiny so many can."""
+    lowered = url.lower()
+    if "day" in lowered:
+        return 4
+    if "hour" in lowered:
+        return 24
+    return 100
+
+
+def _stream_download_process(
     urls: list[str],
+    *,
     mode: str,
-    workers: int,
     cookie: str | None,
     cache_dir: Path,
-    label: str,
-    description: str = "downloading",
-) -> None:
-    try:
-        with (
-            progress_bar(len(urls), unit=label, description=description) as advance,
-            concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool,
-        ):
-            for _ in pool.map(lambda u: download_osm_file(u, mode=mode, cookie=cookie, cache_dir=cache_dir), urls):
-                advance()
-    except requests.exceptions.RequestException as exc:
-        raise OsmsgError(
-            f"Network error downloading {label} after retries ({type(exc).__name__}). "
-            "Re-run to resume: finished downloads are cached, so it continues from where it stopped."
-        ) from exc
-
-
-def _process_all(
-    items: list,
-    *,
+    window: int,
     target,
     initializer,
-    init_args,
+    init_args: tuple,
     chunksize: int,
-    label: str,
     workers: int,
-    extra_iterables: tuple[list, ...] = (),
-    description: str = "processing",
+    label: str,
+    description: str,
+    extra_iterable: list | None = None,
 ) -> None:
+    """Download and parse the range in overlapping windows so the next window downloads while the
+    current one is parsed and its raw files are erased. Peak disk stays ~one window, not the range."""
+    total = len(urls)
+
+    def download_window(download_pool: concurrent.futures.ThreadPoolExecutor, start: int, end: int) -> None:
+        try:
+            for _ in download_pool.map(
+                lambda file_url: download_osm_file(file_url, mode=mode, cookie=cookie, cache_dir=cache_dir),
+                urls[start:end],
+            ):
+                pass
+        except requests.exceptions.RequestException as exc:
+            raise OsmsgError(
+                f"Network error downloading {label} after retries ({type(exc).__name__}). "
+                "Re-run to resume: finished downloads are cached, so it continues from where it stopped."
+            ) from exc
+
     with (
-        progress_bar(len(items), unit=label, description=description) as advance,
+        progress_bar(total, unit=label, description=description) as advance,
+        concurrent.futures.ThreadPoolExecutor(max_workers=_DOWNLOAD_WORKERS) as downloaders,
+        concurrent.futures.ThreadPoolExecutor(max_workers=1) as prefetcher,
+        # spawn, not fork: this pool lives alongside the download threads, and forking a
+        # multi-threaded process risks inheriting a held lock and deadlocking.
         concurrent.futures.ProcessPoolExecutor(
-            max_workers=workers, initializer=initializer, initargs=init_args
-        ) as pool,
+            max_workers=workers,
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=initializer,
+            initargs=init_args,
+        ) as processors,
     ):
-        for _ in pool.map(target, items, *extra_iterables, chunksize=chunksize):
-            advance()
+        download_window(downloaders, 0, min(window, total))
+        start = 0
+        while start < total:
+            end = min(start + window, total)
+            next_start = end
+            prefetching = (
+                prefetcher.submit(download_window, downloaders, next_start, min(next_start + window, total))
+                if next_start < total
+                else None
+            )
+            process_iterables = (
+                (urls[start:end],) if extra_iterable is None else (urls[start:end], extra_iterable[start:end])
+            )
+            for _ in processors.map(target, *process_iterables, chunksize=chunksize):
+                advance()
+            if prefetching is not None:
+                prefetching.result()
+            start = end
 
 
 def run(cfg: RunConfig) -> dict[str, Any]:
@@ -755,24 +795,19 @@ def run(cfg: RunConfig) -> dict[str, Any]:
             cs_config = _processing_config(cfg, parquet_dir=cs_dir, geom_wkt=geom_wkt)
             cs_config["window_start_utc"] = cfg.start_date.astimezone(UTC)
 
-            _download_all(
+            _stream_download_process(
                 urls,
-                "changeset",
-                _DOWNLOAD_WORKERS,
-                None,
-                cfg.cache_dir,
-                "changesets",
-                description="Downloading changesets",
-            )
-            _process_all(
-                urls,
+                mode="changeset",
+                cookie=None,
+                cache_dir=cfg.cache_dir,
+                window=_stream_window(CHANGESETS_REPLICATION),
                 target=process_changeset,
                 initializer=init_changeset_worker,
                 init_args=(cs_config,),
                 chunksize=10,
-                label="changesets",
                 workers=max_workers,
-                description="Processing changesets",
+                label="changesets",
+                description="Changesets",
             )
             dbmod.merge_parquet_files(conn, cs_dir, cleanup=True)
             upsert_state(
@@ -822,27 +857,22 @@ def run(cfg: RunConfig) -> dict[str, Any]:
         cf_config = _processing_config(cfg, parquet_dir=cf_dir, geom_wkt=None)
         cf_config["start_date_utc"] = url_start_date_utc
 
-        _download_all(
-            urls,
-            "changefiles",
-            _DOWNLOAD_WORKERS,
-            cookie,
-            cfg.cache_dir,
-            "changefiles",
-            description="Downloading changefiles",
-        )
         chunksize = 10 if "minute" in url.lower() else 1
         seq_ids = list(range(src_start_seq, src_end_seq + 1))
-        _process_all(
+        _stream_download_process(
             urls,
+            mode="changefiles",
+            cookie=cookie,
+            cache_dir=cfg.cache_dir,
+            window=_stream_window(url),
             target=process_changefile,
             initializer=init_changefile_worker,
             init_args=(valid_changesets, cf_config),
             chunksize=chunksize,
-            label="changefiles",
             workers=max_workers,
-            extra_iterables=(seq_ids,),
-            description="Processing changefiles",
+            label="changefiles",
+            description="Changefiles",
+            extra_iterable=seq_ids,
         )
         dbmod.merge_parquet_files(conn, cf_dir, cleanup=True)
         # state.last_ts is the seq_ts of last_seq so the next tick's lower-bound filter

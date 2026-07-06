@@ -102,8 +102,7 @@ def test_pipeline_state_last_ts_is_seq_aligned(tmp_path, monkeypatch):
         return (["https://fake/101.osc.gz"], fake_server_ts, 101, 101, "u1", "u2")
 
     monkeypatch.setattr(pipeline_mod, "changefile_download_urls", fake_changefile_download_urls)
-    monkeypatch.setattr(pipeline_mod, "_download_all", lambda *a, **kw: None)
-    monkeypatch.setattr(pipeline_mod, "_process_all", lambda *a, **kw: None)
+    monkeypatch.setattr(pipeline_mod, "_stream_download_process", lambda *a, **kw: None)
     monkeypatch.setattr(pipeline_mod.dbmod, "merge_parquet_files", lambda *a, **kw: None)
     monkeypatch.setattr(pipeline_mod, "changefile_seq_timestamp", lambda _base, _seq: seq_ts)
     monkeypatch.setattr(

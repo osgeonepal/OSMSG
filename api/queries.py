@@ -153,58 +153,112 @@ def _user_stats_sql(
     else:
         scope_cte = "WITH stats_scope AS (SELECT * FROM changeset_stats)"
 
-    tag_ctes = {"keys": _TAG_KEY_CTES, "all": _TAG_VALUE_CTES}.get(tag_mode, "")
-    include_tags = tag_mode != "none"
-    tag_select = "COALESCE(tpu.tag_stats, '{}'::jsonb) AS tag_stats" if include_tags else "NULL::jsonb AS tag_stats"
-    tag_join = "LEFT JOIN tag_per_user tpu ON tpu.uid = u.uid" if include_tags else ""
-    tag_group = ", tpu.tag_stats" if include_tags else ""
+    map_changes = """COALESCE(SUM(
+                st.nodes_created + st.nodes_modified + st.nodes_deleted +
+                st.ways_created + st.ways_modified + st.ways_deleted +
+                st.rels_created + st.rels_modified + st.rels_deleted
+            ), 0)"""
+
+    # Rank and page users first so the expensive hashtag/tag expansion runs only for the
+    # returned top-N users, not every user in the window.
+    ranked_cte = f""",
+        ranked AS (
+            SELECT
+                st.uid,
+                COUNT(DISTINCT st.changeset_id) AS changesets,
+                COALESCE(SUM(st.nodes_created), 0) AS nodes_create,
+                COALESCE(SUM(st.nodes_modified), 0) AS nodes_modify,
+                COALESCE(SUM(st.nodes_deleted), 0) AS nodes_delete,
+                COALESCE(SUM(st.ways_created), 0) AS ways_create,
+                COALESCE(SUM(st.ways_modified), 0) AS ways_modify,
+                COALESCE(SUM(st.ways_deleted), 0) AS ways_delete,
+                COALESCE(SUM(st.rels_created), 0) AS rels_create,
+                COALESCE(SUM(st.rels_modified), 0) AS rels_modify,
+                COALESCE(SUM(st.rels_deleted), 0) AS rels_delete,
+                COALESCE(SUM(st.poi_created), 0) AS poi_create,
+                COALESCE(SUM(st.poi_modified), 0) AS poi_modify,
+                {map_changes} AS map_changes,
+                ROW_NUMBER() OVER (ORDER BY {map_changes} DESC, st.uid ASC) AS rank
+            FROM stats_scope st
+            GROUP BY st.uid
+            ORDER BY map_changes DESC, st.uid ASC
+            LIMIT {limit_param} OFFSET {offset_param}
+        )"""
+
+    hashtag_cte = """,
+        user_hashtags AS (
+            SELECT
+                st.uid,
+                ARRAY_AGG(DISTINCT ht.hashtag ORDER BY ht.hashtag) AS hashtags
+            FROM stats_scope st
+            JOIN ranked r ON r.uid = st.uid
+            JOIN changesets cs ON cs.changeset_id = st.changeset_id
+            CROSS JOIN LATERAL UNNEST(cs.hashtags) AS ht(hashtag)
+            WHERE cs.hashtags IS NOT NULL
+            GROUP BY st.uid
+        )"""
+
+    tag_ctes = (
+        """,
+        tag_agg AS (
+            SELECT
+                st.uid,
+                tk.key                                     AS tag_key,
+                tv.key                                     AS tag_val,
+                SUM(COALESCE((tv.value->>'c')::bigint, 0)) AS total_c,
+                SUM(COALESCE((tv.value->>'m')::bigint, 0)) AS total_m,
+                SUM((tv.value->>'len')::double precision)  AS total_len
+            FROM stats_scope st
+            JOIN ranked r ON r.uid = st.uid
+            JOIN LATERAL jsonb_each(st.tag_stats) tk ON st.tag_stats IS NOT NULL
+            JOIN LATERAL jsonb_each(tk.value)     tv ON true
+            GROUP BY st.uid, tk.key, tv.key
+        ),
+        tag_per_key AS (
+            SELECT
+                uid,
+                tag_key,
+                jsonb_object_agg(
+                    tag_val,
+                    CASE WHEN total_len IS NOT NULL
+                        THEN jsonb_build_object('c', total_c, 'm', total_m, 'len', total_len)
+                        ELSE jsonb_build_object('c', total_c, 'm', total_m)
+                    END
+                ) AS tag_vals
+            FROM tag_agg
+            GROUP BY uid, tag_key
+        ),
+        tag_per_user AS (
+            SELECT uid, jsonb_object_agg(tag_key, tag_vals) AS tag_stats
+            FROM tag_per_key
+            GROUP BY uid
+        )"""
+        if include_tags
+        else ""
+    )
+
+    tag_select = "tpu.tag_stats" if include_tags else "NULL::jsonb AS tag_stats"
+    tag_join = "LEFT JOIN tag_per_user tpu ON tpu.uid = r.uid" if include_tags else ""
 
     return f"""
-        {scope_cte}{_HASHTAG_CTE}{tag_ctes}
+        {scope_cte}{ranked_cte}{hashtag_cte}{tag_ctes}
         SELECT
-            u.uid,
+            r.uid,
             u.username AS name,
-            COUNT(DISTINCT st.changeset_id) AS changesets,
-            COALESCE(SUM(st.nodes_created), 0) AS nodes_create,
-            COALESCE(SUM(st.nodes_modified), 0) AS nodes_modify,
-            COALESCE(SUM(st.nodes_deleted), 0) AS nodes_delete,
-            COALESCE(SUM(st.ways_created), 0) AS ways_create,
-            COALESCE(SUM(st.ways_modified), 0) AS ways_modify,
-            COALESCE(SUM(st.ways_deleted), 0) AS ways_delete,
-            COALESCE(SUM(st.rels_created), 0) AS rels_create,
-            COALESCE(SUM(st.rels_modified), 0) AS rels_modify,
-            COALESCE(SUM(st.rels_deleted), 0) AS rels_delete,
-            COALESCE(SUM(st.poi_created), 0) AS poi_create,
-            COALESCE(SUM(st.poi_modified), 0) AS poi_modify,
-            COALESCE(
-                SUM(
-                    st.nodes_created + st.nodes_modified + st.nodes_deleted +
-                    st.ways_created + st.ways_modified + st.ways_deleted +
-                    st.rels_created + st.rels_modified + st.rels_deleted
-                ),
-                0
-            ) AS map_changes,
-            ROW_NUMBER() OVER (
-                ORDER BY
-                    COALESCE(
-                        SUM(
-                            st.nodes_created + st.nodes_modified + st.nodes_deleted +
-                            st.ways_created + st.ways_modified + st.ways_deleted +
-                            st.rels_created + st.rels_modified + st.rels_deleted
-                        ),
-                        0
-                    ) DESC,
-                    u.uid ASC
-            ) AS rank,
+            r.changesets,
+            r.nodes_create, r.nodes_modify, r.nodes_delete,
+            r.ways_create, r.ways_modify, r.ways_delete,
+            r.rels_create, r.rels_modify, r.rels_delete,
+            r.poi_create, r.poi_modify,
+            r.map_changes,
+            r.rank,
             COALESCE(uh.hashtags, ARRAY[]::TEXT[]) AS hashtags,
             {tag_select}
-        FROM users u
-        JOIN stats_scope st ON u.uid = st.uid
-        LEFT JOIN user_hashtags uh ON uh.uid = u.uid
+        FROM ranked r
+        JOIN users u ON u.uid = r.uid
+        LEFT JOIN user_hashtags uh ON uh.uid = r.uid
         {tag_join}
-        GROUP BY u.uid, u.username, uh.hashtags{tag_group}
-        ORDER BY map_changes DESC, u.uid ASC
-        LIMIT {limit_param} OFFSET {offset_param}
+        ORDER BY r.rank
     """
 
 

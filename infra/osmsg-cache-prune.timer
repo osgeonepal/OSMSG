@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily osmsg replication cache prune
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
