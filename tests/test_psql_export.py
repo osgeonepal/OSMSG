@@ -52,11 +52,19 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
     conn.execute("LOAD spatial")
     for stmt in [s.strip() for s in duckdb_clone.split(";") if s.strip()]:
         upper = stmt.upper()
-        if "USING GIN" in upper:
+        if "CREATE INDEX" in upper and "USING" in upper:
             continue
         conn.execute(stmt)
     tables = {r[0] for r in conn.execute("SELECT table_name FROM information_schema.tables").fetchall()}
     assert {"users", "changesets", "changeset_stats", "state"} <= tables
+
+
+def test_pg_schema_uses_explicit_postgres_index_types():
+    assert "idx_changesets_created_at ON changesets USING BTREE (created_at)" in PG_SCHEMA
+    assert "idx_changesets_hashtags ON changesets USING GIN (hashtags)" in PG_SCHEMA
+    assert "idx_changesets_editor ON changesets USING BTREE (editor)" in PG_SCHEMA
+    assert "idx_changesets_bbox ON changesets USING GIST" in PG_SCHEMA
+    assert "box(point(min_lon, min_lat), point(max_lon, max_lat))" in PG_SCHEMA
 
 
 EXPECTED_USER_STATS = {

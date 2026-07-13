@@ -51,7 +51,11 @@ async def health() -> HealthResponse:
 app = Litestar(
     route_handlers=[home, health, v1_router],
     lifespan=[lifespan],
-    cors_config=CORSConfig(allow_origins=["*"]),
+    cors_config=CORSConfig(
+        allow_origins=["*"],
+        allow_methods=["GET", "OPTIONS"],
+        allow_headers=["*"],
+    ),
     openapi_config=OpenAPIConfig(
         title="OSMSG API",
         version="1.0.0",

@@ -1,10 +1,11 @@
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal, TypeVar, cast
+from typing import Annotated, Literal, cast
 
 from litestar import Controller, Router, get
 from litestar.exceptions import HTTPException
 from litestar.params import Parameter
 
+from ..pagination import PaginationParams, paginate_items
 from ..queries import fetch_editor_stats, fetch_hashtag_stats, fetch_hashtag_trends, fetch_map_changes, fetch_user_stats
 from ..schemas import (
     EditorStat,
@@ -13,14 +14,12 @@ from ..schemas import (
     HashtagStatsResponse,
     HashtagTrend,
     MapFeatureCollection,
-    PaginationMeta,
     UserStat,
     UserStatsResponse,
 )
 
 TREND_INTERVALS = {"day", "week", "month"}
 TAG_MODES = {"keys", "all"}
-RowT = TypeVar("RowT")
 
 
 def normalize_hashtags(hashtag: list[str] | None) -> list[str] | None:
@@ -57,21 +56,6 @@ def resolve_required_window(start: datetime | None, end: datetime | None) -> tup
     return start, end
 
 
-def paginate(rows: list[RowT], *, limit: int, offset: int) -> tuple[list[RowT], PaginationMeta]:
-    has_next = len(rows) > limit
-    page_rows = rows[:limit]
-    has_previous = offset > 0
-    return page_rows, PaginationMeta(
-        limit=limit,
-        offset=offset,
-        returned=len(page_rows),
-        has_next=has_next,
-        has_previous=has_previous,
-        next_offset=offset + limit if has_next else None,
-        previous_offset=max(0, offset - limit) if has_previous else None,
-    )
-
-
 class StatsController(Controller):
     path = "/stats"
 
@@ -101,18 +85,18 @@ class StatsController(Controller):
         if tag_mode not in TAG_MODES:
             raise HTTPException(status_code=400, detail="tag_mode must be one of: keys, all")
         resolved_tag_mode = "none" if not tags else cast(Literal["keys", "all"], tag_mode)
+        page_params = PaginationParams(limit=limit, offset=offset)
         rows = await fetch_user_stats(
             start=start,
             end=end,
             hashtag=normalized_hashtag,
             tag_mode=resolved_tag_mode,
-            limit=limit + 1,
-            offset=offset,
+            limit=page_params.query_limit,
+            offset=page_params.offset,
         )
-        rows, pagination = paginate(rows, limit=limit, offset=offset)
-        users = [UserStat(**row) for row in rows]
+        page = paginate_items([UserStat(**row) for row in rows], page_params)
         return UserStatsResponse(
-            count=len(users),
+            count=len(page.items),
             start=start,
             end=end,
             hashtag=normalized_hashtag,
@@ -120,8 +104,8 @@ class StatsController(Controller):
             tag_mode=resolved_tag_mode,
             limit=limit,
             offset=offset,
-            pagination=pagination,
-            users=users,
+            pagination=page,
+            users=page.items,
         )
 
 
@@ -151,39 +135,35 @@ class HashtagStatsController(Controller):
 
         start, end = resolve_required_window(start, end)
         normalized_hashtag = normalize_hashtags(hashtag)
+        page_params = PaginationParams(limit=limit, offset=offset)
         hashtag_rows = await fetch_hashtag_stats(
             start=start,
             end=end,
             hashtag=normalized_hashtag,
-            limit=limit + 1,
-            offset=offset,
+            limit=page_params.query_limit,
+            offset=page_params.offset,
         )
         trend_rows = await fetch_hashtag_trends(
             start=start,
             end=end,
             interval=interval,
             hashtag=normalized_hashtag,
-            limit=limit + 1,
-            offset=offset,
+            limit=page_params.query_limit,
+            offset=page_params.offset,
         )
-        hashtag_rows, pagination = paginate(hashtag_rows, limit=limit, offset=offset)
-        trend_rows, trend_pagination = paginate(trend_rows, limit=limit, offset=offset)
-        if trend_pagination.has_next and not pagination.has_next:
-            pagination.has_next = True
-            pagination.next_offset = offset + limit
-        hashtags = [HashtagStat(**row) for row in hashtag_rows]
-        trends = [HashtagTrend(**row) for row in trend_rows]
+        hashtag_page = paginate_items([HashtagStat(**row) for row in hashtag_rows], page_params)
+        trend_page = paginate_items([HashtagTrend(**row) for row in trend_rows], page_params)
         return HashtagStatsResponse(
-            count=len(hashtags),
+            count=len(hashtag_page.items),
             start=start,
             end=end,
             hashtag=normalized_hashtag,
             interval=interval,
             limit=limit,
             offset=offset,
-            pagination=pagination,
-            hashtags=hashtags,
-            trends=trends,
+            pagination=hashtag_page,
+            hashtags=hashtag_page.items,
+            trends=trend_page.items,
         )
 
 
@@ -208,24 +188,24 @@ class EditorStatsController(Controller):
         offset: Annotated[int, Parameter(ge=0, description="Page offset.")] = 0,
     ) -> EditorStatsResponse:
         start, end = resolve_optional_window(start, end)
+        page_params = PaginationParams(limit=limit, offset=offset)
         rows = await fetch_editor_stats(
             start=start,
             end=end,
             include_version=include_version,
-            limit=limit + 1,
-            offset=offset,
+            limit=page_params.query_limit,
+            offset=page_params.offset,
         )
-        rows, pagination = paginate(rows, limit=limit, offset=offset)
-        editors = [EditorStat(**row) for row in rows]
+        page = paginate_items([EditorStat(**row) for row in rows], page_params)
         return EditorStatsResponse(
-            count=len(editors),
+            count=len(page.items),
             start=start,
             end=end,
             include_version=include_version,
             limit=limit,
             offset=offset,
-            pagination=pagination,
-            editors=editors,
+            pagination=page,
+            editors=page.items,
         )
 
 
@@ -250,20 +230,21 @@ class MapController(Controller):
     ) -> MapFeatureCollection:
         start, end = resolve_optional_window(start, end)
         normalized_hashtag = normalize_hashtags(hashtag)
+        page_params = PaginationParams(limit=limit, offset=offset)
         feature_collection = await fetch_map_changes(
             start=start,
             end=end,
             hashtag=normalized_hashtag,
-            limit=limit + 1,
-            offset=offset,
+            limit=page_params.query_limit,
+            offset=page_params.offset,
         )
-        features, pagination = paginate(feature_collection["features"], limit=limit, offset=offset)
+        page = paginate_items(feature_collection["features"], page_params)
         return MapFeatureCollection(
-            count=len(features),
+            count=len(page.items),
             limit=limit,
             offset=offset,
-            pagination=pagination,
-            features=features,
+            pagination=page,
+            features=page.items,
         )
 
 

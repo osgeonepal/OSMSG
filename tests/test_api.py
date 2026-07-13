@@ -6,11 +6,13 @@ from importlib import import_module
 
 import pytest
 from litestar import Litestar
+from litestar.config.cors import CORSConfig
 from litestar.testing import TestClient
 
 from api import app as api_app
 from api.app import health
 from api.db import close_pool, ensure_schema, open_pool
+from api.pagination import PaginationParams, paginate_items
 from api.pg_schema import PG_SCHEMA as API_PG_SCHEMA
 from api.routers.v1 import normalize_hashtags, v1_router
 from osmsg.export.psql import to_psql
@@ -58,6 +60,37 @@ def test_normalize_hashtags_accepts_bare_or_prefixed_values():
 
 def test_normalize_hashtags_dedupes_case_insensitively():
     assert normalize_hashtags(["maproulette", "#MapRoulette", "#roads"]) == ["#maproulette", "#roads"]
+
+
+def test_pagination_model_fetches_one_extra_row_for_next_page():
+    params = PaginationParams(limit=2, offset=4)
+    assert params.query_limit == 3
+
+    page = paginate_items(["a", "b", "c"], params)
+
+    assert page.items == ["a", "b"]
+    assert page.limit == 2
+    assert page.offset == 4
+    assert page.total == 7
+
+
+def test_app_cors_allows_browser_preflight():
+    app = Litestar(
+        route_handlers=[v1_router],
+        cors_config=CORSConfig(allow_origins=["*"], allow_methods=["GET", "OPTIONS"], allow_headers=["*"]),
+    )
+    with TestClient(app) as client:
+        response = client.options(
+            "/api/v1/stats",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 204
+    assert response.headers["access-control-allow-origin"] == "*"
 
 
 def _v1_app(monkeypatch, **fakes):
@@ -124,13 +157,31 @@ def test_user_stats_endpoint_returns_expected_response(monkeypatch):
         "limit": 1,
         "offset": 0,
         "pagination": {
+            "items": [
+                {
+                    "uid": 10,
+                    "name": "alice",
+                    "changesets": 2,
+                    "nodes_create": 40,
+                    "nodes_modify": 5,
+                    "nodes_delete": 0,
+                    "ways_create": 12,
+                    "ways_modify": 1,
+                    "ways_delete": 0,
+                    "rels_create": 0,
+                    "rels_modify": 0,
+                    "rels_delete": 0,
+                    "poi_create": 5,
+                    "poi_modify": 1,
+                    "map_changes": 58,
+                    "rank": 1,
+                    "hashtags": ["#mapathon", "#roads"],
+                    "tag_stats": {"building": {"c": 3, "m": 0, "len": None}},
+                }
+            ],
             "limit": 1,
             "offset": 0,
-            "returned": 1,
-            "has_next": False,
-            "has_previous": False,
-            "next_offset": None,
-            "previous_offset": None,
+            "total": 1,
         },
         "users": [
             {
@@ -275,13 +326,13 @@ def test_hashtag_stats_endpoint_returns_expected_response(monkeypatch):
         "limit": 2,
         "offset": 0,
         "pagination": {
+            "items": [
+                {"hashtag": "#mapathon", "changesets": 4, "users": 3, "map_changes": 100, "rank": 1},
+                {"hashtag": "#roads", "changesets": 2, "users": 2, "map_changes": 25, "rank": 2},
+            ],
             "limit": 2,
             "offset": 0,
-            "returned": 2,
-            "has_next": False,
-            "has_previous": False,
-            "next_offset": None,
-            "previous_offset": None,
+            "total": 2,
         },
         "hashtags": [
             {"hashtag": "#mapathon", "changesets": 4, "users": 3, "map_changes": 100, "rank": 1},
@@ -334,13 +385,13 @@ def test_editor_stats_endpoint_returns_expected_response(monkeypatch):
         "limit": 2,
         "offset": 0,
         "pagination": {
+            "items": [
+                {"editor": "iD 2.34.0", "changesets": 10, "users": 5, "map_changes": 500, "rank": 1},
+                {"editor": "JOSM", "changesets": 4, "users": 2, "map_changes": 120, "rank": 2},
+            ],
             "limit": 2,
             "offset": 0,
-            "returned": 2,
-            "has_next": False,
-            "has_previous": False,
-            "next_offset": None,
-            "previous_offset": None,
+            "total": 2,
         },
         "editors": [
             {"editor": "iD 2.34.0", "changesets": 10, "users": 5, "map_changes": 500, "rank": 1},

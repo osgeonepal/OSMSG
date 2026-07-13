@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
+from litestar.pagination import OffsetPagination
 from pydantic import BaseModel, Field
 
 
@@ -14,16 +15,6 @@ class TagKeyStats(BaseModel):
     c: int = 0
     m: int = 0
     len: float | None = None
-
-
-class PaginationMeta(BaseModel):
-    limit: int
-    offset: int
-    returned: int
-    has_next: bool
-    has_previous: bool
-    next_offset: int | None
-    previous_offset: int | None
 
 
 class UserStat(BaseModel):
@@ -56,7 +47,7 @@ class UserStatsResponse(BaseModel):
     tag_mode: Literal["none", "keys", "all"]
     limit: int
     offset: int
-    pagination: PaginationMeta
+    pagination: OffsetPagination[UserStat]
     users: list[UserStat]
 
 
@@ -65,7 +56,7 @@ class MapFeatureCollection(BaseModel):
     count: int
     limit: int
     offset: int
-    pagination: PaginationMeta
+    pagination: OffsetPagination[dict[str, Any]]
     features: list[dict[str, Any]]
 
 
@@ -98,7 +89,7 @@ class HashtagStatsResponse(BaseModel):
     interval: str
     limit: int
     offset: int
-    pagination: PaginationMeta
+    pagination: OffsetPagination[HashtagStat]
     hashtags: list[HashtagStat]
     trends: list[HashtagTrend]
 
@@ -118,7 +109,7 @@ class EditorStatsResponse(BaseModel):
     include_version: bool
     limit: int
     offset: int
-    pagination: PaginationMeta
+    pagination: OffsetPagination[EditorStat]
     editors: list[EditorStat]
 
 

@@ -145,10 +145,12 @@ async def create_synthetic_tables(conn: asyncpg.Connection, rows: int) -> None:
 
 async def ensure_indexes(conn: asyncpg.Connection) -> None:
     statements = [
-        "CREATE INDEX IF NOT EXISTS idx_changesets_created_at ON changesets(created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_changesets_created_at ON changesets USING BTREE (created_at)",
         "CREATE INDEX IF NOT EXISTS idx_changesets_hashtags ON changesets USING GIN (hashtags)",
-        "CREATE INDEX IF NOT EXISTS idx_changesets_editor ON changesets(editor)",
-        "CREATE INDEX IF NOT EXISTS idx_changeset_stats_changeset_id ON changeset_stats(changeset_id)",
+        "CREATE INDEX IF NOT EXISTS idx_changesets_editor ON changesets USING BTREE (editor)",
+        "CREATE INDEX IF NOT EXISTS idx_changesets_bbox ON changesets USING GIST "
+        "(box(point(min_lon, min_lat), point(max_lon, max_lat)))",
+        "CREATE INDEX IF NOT EXISTS idx_changeset_stats_changeset_id ON changeset_stats USING BTREE (changeset_id)",
     ]
     for statement in statements:
         await conn.execute(statement)

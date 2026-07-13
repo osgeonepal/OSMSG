@@ -120,7 +120,8 @@ GET /docs/swagger
 `tag_mode=all` to opt in to the full key/value breakdown, or `tags=false` to skip
 JSONB expansion for cheaper responses. Editor stats group versions into editor
 families by default; use `include_version=true` for full version strings. Collection
-responses include a `pagination` object with next/previous offset metadata. Map
+responses include a Litestar `OffsetPagination` object with `items`, `limit`,
+`offset`, and `total`. Map
 features use centroid Point geometry only, ready for clustering and heatmaps.
 
 ## Run the API standalone (without compose)

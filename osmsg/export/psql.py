@@ -6,12 +6,13 @@ from ..exceptions import OsmsgError
 from ..pg_schema import PG_SCHEMA
 
 _BULK_INDEXES = [
-    ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets (created_at)"),
+    ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets USING BTREE (created_at)"),
     (
         "idx_changesets_bbox",
-        "CREATE INDEX idx_changesets_bbox ON changesets (min_lon, min_lat, max_lon, max_lat)",
+        "CREATE INDEX idx_changesets_bbox ON changesets USING GIST "
+        "(box(point(min_lon, min_lat), point(max_lon, max_lat)))",
     ),
-    ("idx_changeset_stats_uid", "CREATE INDEX idx_changeset_stats_uid ON changeset_stats (uid)"),
+    ("idx_changeset_stats_uid", "CREATE INDEX idx_changeset_stats_uid ON changeset_stats USING BTREE (uid)"),
 ]
 _BULK_FKS = [
     ("changesets", "changesets_uid_fkey", "FOREIGN KEY (uid) REFERENCES users (uid)"),
