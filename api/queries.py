@@ -123,7 +123,7 @@ def _user_stats_sql(
     tag_mode: str,
 ) -> str:
     n = 1
-    include_tags = tag_mode == "all"
+    include_tags = tag_mode != "none"
     changeset_filters: list[str] = []
 
     if filter_dates:
@@ -199,8 +199,39 @@ def _user_stats_sql(
             GROUP BY st.uid
         )"""
 
-    tag_ctes = (
-        """,
+    if tag_mode == "keys":
+        tag_ctes = """,
+        tag_key_agg AS (
+            SELECT
+                st.uid,
+                tk.key AS tag_key,
+                SUM(COALESCE(key_stats.total_c, 0)) AS total_c,
+                SUM(COALESCE(key_stats.total_m, 0)) AS total_m,
+                SUM(key_stats.total_len) AS total_len
+            FROM stats_scope st
+            JOIN ranked r ON r.uid = st.uid
+            JOIN LATERAL jsonb_each(st.tag_stats) tk ON st.tag_stats IS NOT NULL
+            JOIN LATERAL (
+                SELECT
+                    SUM(COALESCE((tv.value->>'c')::bigint, 0)) AS total_c,
+                    SUM(COALESCE((tv.value->>'m')::bigint, 0)) AS total_m,
+                    SUM((tv.value->>'len')::double precision) AS total_len
+                FROM jsonb_each(tk.value) tv
+            ) key_stats ON true
+            GROUP BY st.uid, tk.key
+        ),
+        tag_per_user AS (
+            SELECT
+                uid,
+                jsonb_object_agg(
+                    tag_key,
+                    jsonb_build_object('c', total_c, 'm', total_m, 'len', total_len)
+                ) AS tag_stats
+            FROM tag_key_agg
+            GROUP BY uid
+        )"""
+    elif tag_mode == "all":
+        tag_ctes = """,
         tag_agg AS (
             SELECT
                 st.uid,
@@ -234,11 +265,10 @@ def _user_stats_sql(
             FROM tag_per_key
             GROUP BY uid
         )"""
-        if include_tags
-        else ""
-    )
+    else:
+        tag_ctes = ""
 
-    tag_select = "tpu.tag_stats" if include_tags else "NULL::jsonb AS tag_stats"
+    tag_select = "COALESCE(tpu.tag_stats, '{}'::jsonb) AS tag_stats" if include_tags else "NULL::jsonb AS tag_stats"
     tag_join = "LEFT JOIN tag_per_user tpu ON tpu.uid = r.uid" if include_tags else ""
 
     return f"""
