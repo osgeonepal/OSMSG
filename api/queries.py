@@ -123,6 +123,7 @@ def _user_stats_sql(
     tag_mode: str,
 ) -> str:
     n = 1
+    include_tags = tag_mode == "all"
     changeset_filters: list[str] = []
 
     if filter_dates:
