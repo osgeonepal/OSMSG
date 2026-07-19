@@ -16,6 +16,20 @@ from .routers.v1 import v1_router
 from .schemas import HealthResponse
 
 TEMPLATES = Path(__file__).parent / "templates"
+DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:5520",
+    "http://127.0.0.1:5520",
+)
+
+
+def get_cors_origins() -> list[str]:
+    raw_origins = os.getenv("OSMSG_CORS_ORIGINS", "")
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    return origins or list(DEFAULT_CORS_ORIGINS)
 
 
 @asynccontextmanager
@@ -52,7 +66,7 @@ app = Litestar(
     route_handlers=[home, health, v1_router],
     lifespan=[lifespan],
     cors_config=CORSConfig(
-        allow_origins=["*"],
+        allow_origins=get_cors_origins(),
         allow_methods=["GET", "OPTIONS"],
         allow_headers=["*"],
     ),

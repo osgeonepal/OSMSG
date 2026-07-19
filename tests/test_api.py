@@ -10,7 +10,7 @@ from litestar.config.cors import CORSConfig
 from litestar.testing import TestClient
 
 from api import app as api_app
-from api.app import health
+from api.app import get_cors_origins, health
 from api.db import close_pool, ensure_schema, open_pool
 from api.pagination import PaginationParams, paginate_items
 from api.pg_schema import PG_SCHEMA as API_PG_SCHEMA
@@ -74,23 +74,33 @@ def test_pagination_model_fetches_one_extra_row_for_next_page():
     assert page.total == 7
 
 
-def test_app_cors_allows_browser_preflight():
+def test_get_cors_origins_reads_comma_separated_env(monkeypatch):
+    monkeypatch.setenv(
+        "OSMSG_CORS_ORIGINS",
+        "https://leaderboard.example.org, http://localhost:5500,  ",
+    )
+
+    assert get_cors_origins() == ["https://leaderboard.example.org", "http://localhost:5500"]
+
+
+def test_app_cors_allows_whitelisted_browser_preflight(monkeypatch):
+    monkeypatch.setenv("OSMSG_CORS_ORIGINS", "https://leaderboard.example.org")
     app = Litestar(
         route_handlers=[v1_router],
-        cors_config=CORSConfig(allow_origins=["*"], allow_methods=["GET", "OPTIONS"], allow_headers=["*"]),
+        cors_config=CORSConfig(allow_origins=get_cors_origins(), allow_methods=["GET", "OPTIONS"], allow_headers=["*"]),
     )
     with TestClient(app) as client:
         response = client.options(
             "/api/v1/stats",
             headers={
-                "Origin": "http://localhost:5173",
+                "Origin": "https://leaderboard.example.org",
                 "Access-Control-Request-Method": "GET",
                 "Access-Control-Request-Headers": "content-type",
             },
         )
 
     assert response.status_code == 204
-    assert response.headers["access-control-allow-origin"] == "*"
+    assert response.headers["access-control-allow-origin"] == "https://leaderboard.example.org"
 
 
 def _v1_app(monkeypatch, **fakes):
