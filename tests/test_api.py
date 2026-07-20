@@ -83,6 +83,15 @@ def test_get_cors_origins_reads_comma_separated_env(monkeypatch):
     assert get_cors_origins() == ["https://leaderboard.example.org", "http://localhost:5500"]
 
 
+def test_get_cors_origins_defaults_include_public_frontends(monkeypatch):
+    monkeypatch.delenv("OSMSG_CORS_ORIGINS", raising=False)
+
+    origins = get_cors_origins()
+
+    assert "https://osgeonepal.github.io" in origins
+    assert "https://osmsg.osgeonepal.org" in origins
+
+
 def test_app_cors_allows_whitelisted_browser_preflight(monkeypatch):
     monkeypatch.setenv("OSMSG_CORS_ORIGINS", "https://leaderboard.example.org")
     app = Litestar(
