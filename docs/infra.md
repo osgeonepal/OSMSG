@@ -109,6 +109,33 @@ docker image prune -af && docker builder prune -af
 
 ```text
 GET /health
-GET /api/v1/stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&tags=true|false][&limit=N][&offset=N]
+GET /api/v1/stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&tags=true|false][&tag_mode=keys|all][&limit=N][&offset=N]
+GET /api/v1/hashtag-stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&interval=day|week|month][&limit=N][&offset=N]
+GET /api/v1/editor-stats?start=<ISO8601>&end=<ISO8601>[&include_version=true|false][&limit=N][&offset=N]
+GET /api/v1/map?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&limit=N][&offset=N]
 GET /docs/swagger
 ```
+
+`tags=true&tag_mode=keys` (the default) returns compact per-key totals. Use
+`tag_mode=all` to opt in to the full key/value breakdown, or `tags=false` to skip
+JSONB expansion for cheaper responses. Editor stats group versions into editor
+families by default; use `include_version=true` for full version strings. Collection
+responses include a Litestar `OffsetPagination` object with `items`, `limit`,
+`offset`, and `total`. Map
+features use centroid Point geometry only, ready for clustering and heatmaps.
+
+## Run the API standalone (without compose)
+
+```bash
+uv run osmsg --last day --format psql --psql-dsn "$DATABASE_URL" --name api_last_day
+uv run --group api litestar --app api.app:app run --host 0.0.0.0 --port 8000
+```
+
+## Volumes
+
+| Volume | Contents |
+| --- | --- |
+| `pgdata` | Postgres data |
+| `osmsg-data` | DuckDB state files + parquet output |
+| `osmsg-cache` | Downloaded replication diff cache |
+| `caddy-data` | TLS certificates |

@@ -6,9 +6,13 @@ from ..exceptions import OsmsgError
 from ..pg_schema import PG_SCHEMA
 
 _BULK_INDEXES = [
-    ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets (created_at)"),
-    ("idx_changesets_geom", "CREATE INDEX idx_changesets_geom ON changesets USING GIST (geom)"),
-    ("idx_changeset_stats_uid", "CREATE INDEX idx_changeset_stats_uid ON changeset_stats (uid)"),
+    ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets USING BTREE (created_at)"),
+    (
+        "idx_changesets_bbox",
+        "CREATE INDEX idx_changesets_bbox ON changesets USING GIST "
+        "(box(point(min_lon, min_lat), point(max_lon, max_lat)))",
+    ),
+    ("idx_changeset_stats_uid", "CREATE INDEX idx_changeset_stats_uid ON changeset_stats USING BTREE (uid)"),
 ]
 _BULK_FKS = [
     ("changesets", "changesets_uid_fkey", "FOREIGN KEY (uid) REFERENCES users (uid)"),
@@ -19,6 +23,30 @@ _BULK_FKS = [
     ),
     ("changeset_stats", "changeset_stats_uid_fkey", "FOREIGN KEY (uid) REFERENCES users (uid)"),
 ]
+
+
+def _changeset_bbox_select(conn: duckdb.DuckDBPyConnection) -> str:
+    columns = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'changesets'"
+        ).fetchall()
+    }
+    if {"min_lon", "min_lat", "max_lon", "max_lat"}.issubset(columns):
+        return "min_lon, min_lat, max_lon, max_lat"
+    if "geom" in columns:
+        return """
+                CASE WHEN geom IS NOT NULL THEN ST_XMin(geom) END AS min_lon,
+                CASE WHEN geom IS NOT NULL THEN ST_YMin(geom) END AS min_lat,
+                CASE WHEN geom IS NOT NULL THEN ST_XMax(geom) END AS max_lon,
+                CASE WHEN geom IS NOT NULL THEN ST_YMax(geom) END AS max_lat
+        """
+    return """
+                NULL::DOUBLE AS min_lon,
+                NULL::DOUBLE AS min_lat,
+                NULL::DOUBLE AS max_lon,
+                NULL::DOUBLE AS max_lat
+    """
 
 
 _BULK_COMMIT_CHUNKS = 32
@@ -37,15 +65,29 @@ def _pg_has_history(conn: duckdb.DuckDBPyConnection) -> bool:
 
 def _push_changesets(conn: duckdb.DuckDBPyConnection, where: str = "") -> None:
     # Newer non-NULL wins, NULL never downgrades (mirrors the DuckDB-side merge).
+    bbox_select = _changeset_bbox_select(conn)
     conn.execute(
         f"""
-        INSERT INTO pg_target.changesets AS c (changeset_id, uid, created_at, hashtags, editor, geom)
-        SELECT changeset_id, uid, created_at, hashtags, editor, geom FROM changesets {where}
+        INSERT INTO pg_target.changesets AS c (
+            changeset_id, uid, created_at, hashtags, editor,
+            min_lon, min_lat, max_lon, max_lat
+        )
+        SELECT
+            changeset_id,
+            uid,
+            created_at,
+            hashtags,
+            editor,
+            {bbox_select}
+        FROM changesets {where}
         ON CONFLICT (changeset_id) DO UPDATE SET
             created_at = COALESCE(EXCLUDED.created_at, c.created_at),
             hashtags   = COALESCE(EXCLUDED.hashtags,   c.hashtags),
             editor     = COALESCE(EXCLUDED.editor,     c.editor),
-            geom       = COALESCE(EXCLUDED.geom,       c.geom)
+            min_lon    = COALESCE(EXCLUDED.min_lon,    c.min_lon),
+            min_lat    = COALESCE(EXCLUDED.min_lat,    c.min_lat),
+            max_lon    = COALESCE(EXCLUDED.max_lon,    c.max_lon),
+            max_lat    = COALESCE(EXCLUDED.max_lat,    c.max_lat)
         """
     )
 

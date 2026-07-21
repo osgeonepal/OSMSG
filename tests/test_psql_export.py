@@ -46,22 +46,25 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
     """Each individual CREATE statement is well-formed enough that the postgres
     extension's parser would accept it, we use DuckDB's own parser as an
     approximation (DuckDB's CREATE TABLE syntax is compatible)."""
-    duckdb_clone = (
-        PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
-        .replace("JSONB", "JSON")
-        .replace("TEXT", "VARCHAR")
-        .replace("GEOMETRY(POLYGON)", "GEOMETRY")
-    )
+    duckdb_clone = PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE").replace("JSONB", "JSON").replace("TEXT", "VARCHAR")
     conn = duckdb.connect(":memory:")
     conn.execute("INSTALL spatial")
     conn.execute("LOAD spatial")
     for stmt in [s.strip() for s in duckdb_clone.split(";") if s.strip()]:
         upper = stmt.upper()
-        if upper.startswith("CREATE EXTENSION") or "USING GIST" in upper:
+        if "CREATE INDEX" in upper and "USING" in upper:
             continue
         conn.execute(stmt)
     tables = {r[0] for r in conn.execute("SELECT table_name FROM information_schema.tables").fetchall()}
     assert {"users", "changesets", "changeset_stats", "state"} <= tables
+
+
+def test_pg_schema_uses_explicit_postgres_index_types():
+    assert "idx_changesets_created_at ON changesets USING BTREE (created_at)" in PG_SCHEMA
+    assert "idx_changesets_hashtags ON changesets USING GIN (hashtags)" in PG_SCHEMA
+    assert "idx_changesets_editor ON changesets USING BTREE (editor)" in PG_SCHEMA
+    assert "idx_changesets_bbox ON changesets USING GIST" in PG_SCHEMA
+    assert "box(point(min_lon, min_lat), point(max_lon, max_lat))" in PG_SCHEMA
 
 
 EXPECTED_USER_STATS = {
@@ -323,8 +326,12 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
     verifier.execute("LOAD postgres")
     verifier.execute(f"ATTACH '{safe_dsn}' AS pg_src (TYPE postgres, READ_ONLY)")
     try:
-        editor, hashtags, has_geom = verifier.execute(
-            "SELECT editor, hashtags, geom IS NOT NULL FROM pg_src.changesets WHERE changeset_id = 900900"
+        editor, hashtags, min_lon, min_lat, max_lon, max_lat = verifier.execute(
+            """
+            SELECT editor, hashtags, min_lon, min_lat, max_lon, max_lat
+            FROM pg_src.changesets
+            WHERE changeset_id = 900900
+            """
         ).fetchone()
         n_stats = verifier.execute(
             "SELECT COUNT(*) FROM pg_src.changeset_stats WHERE changeset_id = 900900"
@@ -335,7 +342,7 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
 
     assert editor == "JOSM"
     assert hashtags == ["#x"]
-    assert has_geom is True
+    assert (min_lon, min_lat, max_lon, max_lat) == (10.0, 20.0, 11.0, 21.0)
     assert n_stats == 1
 
 

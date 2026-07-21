@@ -1,5 +1,4 @@
 PG_SCHEMA = """
-CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE TABLE IF NOT EXISTS users (
     uid      BIGINT PRIMARY KEY,
     username TEXT NOT NULL
@@ -10,10 +9,17 @@ CREATE TABLE IF NOT EXISTS changesets (
     created_at   TIMESTAMPTZ,
     hashtags     TEXT[],
     editor       TEXT,
-    geom         GEOMETRY(POLYGON)
+    min_lon      DOUBLE PRECISION,
+    min_lat      DOUBLE PRECISION,
+    max_lon      DOUBLE PRECISION,
+    max_lat      DOUBLE PRECISION
 );
-CREATE INDEX IF NOT EXISTS idx_changesets_created_at ON changesets(created_at);
-CREATE INDEX IF NOT EXISTS idx_changesets_geom ON changesets USING GIST (geom);
+CREATE INDEX IF NOT EXISTS idx_changesets_created_at ON changesets USING BTREE (created_at);
+CREATE INDEX IF NOT EXISTS idx_changesets_hashtags ON changesets USING GIN (hashtags);
+CREATE INDEX IF NOT EXISTS idx_changesets_editor ON changesets USING BTREE (editor);
+CREATE INDEX IF NOT EXISTS idx_changesets_bbox ON changesets USING GIST (
+    box(point(min_lon, min_lat), point(max_lon, max_lat))
+);
 CREATE TABLE IF NOT EXISTS changeset_stats (
     changeset_id   BIGINT NOT NULL REFERENCES changesets(changeset_id),
     seq_id         BIGINT NOT NULL,
@@ -32,8 +38,8 @@ CREATE TABLE IF NOT EXISTS changeset_stats (
     tag_stats      JSONB,
     PRIMARY KEY (seq_id, changeset_id)
 );
-CREATE INDEX IF NOT EXISTS idx_changeset_stats_uid ON changeset_stats(uid);
-CREATE INDEX IF NOT EXISTS idx_changeset_stats_changeset_id ON changeset_stats(changeset_id);
+CREATE INDEX IF NOT EXISTS idx_changeset_stats_uid ON changeset_stats USING BTREE (uid);
+CREATE INDEX IF NOT EXISTS idx_changeset_stats_changeset_id ON changeset_stats USING BTREE (changeset_id);
 CREATE TABLE IF NOT EXISTS state (
     source_url  TEXT PRIMARY KEY,
     last_seq    BIGINT NOT NULL,
