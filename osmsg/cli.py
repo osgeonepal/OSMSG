@@ -263,6 +263,14 @@ def main(
             "whole published history; --start/--end loads a slice. Follow with --update to catch up.",
         ),
     ] = False,
+    seed_only: Annotated[
+        bool,
+        typer.Option(
+            "--seed-only",
+            help="With --insert: seed resume state at the published frontier without ingesting any "
+            "history (it stays remote), so --update only ever fetches the live tail. The lightest setup.",
+        ),
+    ] = False,
     osh_file: Annotated[
         str | None,
         typer.Option("--osh-file", help="Insert from a local .osh.pbf instead of the published dataset."),
@@ -295,6 +303,9 @@ def main(
         raise typer.Exit(code=2)
     if insert and update:
         error("--insert and --update are mutually exclusive; insert first, then update.")
+        raise typer.Exit(code=2)
+    if seed_only and not insert:
+        error("--seed-only is only valid with --insert.")
         raise typer.Exit(code=2)
     if insert and (last is not None or days is not None):
         error("--insert takes --start/--end (or no window), not --last/--days.")
@@ -344,6 +355,7 @@ def main(
         history_mode="auto" if history else "off",
         history_url=history_url,
         insert=insert,
+        seed_only=seed_only,
         osh_file=osh_file,
         changeset_file=changeset_file,
         overwrite=overwrite,
@@ -395,10 +407,10 @@ def main(
             "name",
             "changesets",
             "map_changes",
-            "nodes_create",
-            "ways_create",
-            "rels_create",
-            "poi_create",
+            "nodes_created",
+            "ways_created",
+            "rels_created",
+            "poi_created",
             "hashtags",
         ),
         title=f"Top users (showing {display_n} of {result['rows']})",

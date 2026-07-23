@@ -1,14 +1,41 @@
 from __future__ import annotations
 
+import os
+import re
 from typing import Any
 
 import duckdb
 
 from .duckdb_schema import DUCKDB_SCHEMA
 
+_MEMORY_LIMIT_RE = re.compile(r"^\d+(\.\d+)?\s?(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$", re.IGNORECASE)
+
+
+def _apply_runtime_pragmas(conn: duckdb.DuckDBPyConnection) -> None:
+    """Bound DuckDB memory and point spilling at a roomy disk, from operator env.
+
+    Unset means DuckDB defaults, so library and test behaviour is unchanged. On a
+    memory-capped host these keep a large merge/aggregation spilling to disk instead
+    of aborting with an out-of-memory error.
+    """
+    memory_limit = os.environ.get("OSMSG_DUCKDB_MEMORY_LIMIT")
+    if memory_limit:
+        if not _MEMORY_LIMIT_RE.match(memory_limit):
+            raise ValueError(f"OSMSG_DUCKDB_MEMORY_LIMIT must be like '1GB', got {memory_limit!r}")
+        conn.execute(f"SET memory_limit='{memory_limit}'")
+    threads = os.environ.get("OSMSG_DUCKDB_THREADS")
+    if threads:
+        conn.execute(f"SET threads={int(threads)}")
+    temp_directory = os.environ.get("OSMSG_DUCKDB_TEMP_DIR")
+    if temp_directory:
+        os.makedirs(temp_directory, exist_ok=True)
+        conn.execute(f"SET temp_directory='{temp_directory.replace(chr(39), chr(39) * 2)}'")
+
 
 def connect(db_path: str) -> duckdb.DuckDBPyConnection:
-    return duckdb.connect(db_path)
+    conn = duckdb.connect(db_path)
+    _apply_runtime_pragmas(conn)
+    return conn
 
 
 def close(conn: duckdb.DuckDBPyConnection) -> None:

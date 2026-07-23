@@ -8,14 +8,16 @@ from litestar.contrib.jinja import JinjaTemplateEngine
 from litestar.openapi.config import OpenAPIConfig
 from litestar.openapi.plugins import SwaggerRenderPlugin
 from litestar.response import Template
+from litestar.static_files import create_static_files_router
 from litestar.template.config import TemplateConfig
 
 from .db import close_pool, ensure_schema, open_pool
 from .queries import fetch_state
-from .routers.v1 import v1_router
+from .routers.hashtag import v2_router
 from .schemas import HealthResponse
 
 TEMPLATES = Path(__file__).parent / "templates"
+FRONTEND_DIST = os.getenv("FRONTEND_DIST")
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -50,6 +52,16 @@ async def home() -> Template:
     return Template("home.html")
 
 
+def _root_handlers() -> list:
+    """Serve the built frontend at / when FRONTEND_DIST points to a directory, else the API home page.
+    The API routes (/health, /api/*, /docs) are registered explicitly and take precedence over the
+    static catch-all; html_mode returns index.html for directory and client-side routes. The frontend
+    uses window.location.origin as its API base, so same-origin serving needs no extra config."""
+    if FRONTEND_DIST and Path(FRONTEND_DIST).is_dir():
+        return [create_static_files_router(path="/", directories=[FRONTEND_DIST], html_mode=True)]
+    return [home]
+
+
 @get("/health")
 async def health() -> HealthResponse:
     try:
@@ -65,7 +77,7 @@ async def health() -> HealthResponse:
 
 
 app = Litestar(
-    route_handlers=[home, health, v1_router],
+    route_handlers=[*_root_handlers(), health, v2_router],
     lifespan=[lifespan],
     cors_config=CORSConfig(
         allow_origins=get_cors_origins(),

@@ -10,6 +10,8 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from ..stats import tag_list_expr
+
 
 def _quarantine_corrupt(parquet_dir: Path) -> None:
     """Rename unreadable parquet shards out of the way so the bulk read doesn't abort."""
@@ -153,6 +155,9 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
                 """
             )
         if any(parquet_dir.glob("temp_*_changeset_stats_*.parquet")):
+            # The shard keeps tag_stats as the compact JSON wire form; materialize the native `tags`.
+            conn.execute("INSTALL json")
+            conn.execute("LOAD json")
             conn.execute(
                 f"""
                 INSERT OR IGNORE INTO changeset_stats
@@ -161,7 +166,7 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
                        ways_created,  ways_modified,  ways_deleted,
                        rels_created,  rels_modified,  rels_deleted,
                        poi_created,   poi_modified,
-                       tag_stats::JSON
+                       {tag_list_expr("tag_stats")} AS tags
                 FROM read_parquet('{pattern("changeset_stats")}')
                 """
             )

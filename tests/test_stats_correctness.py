@@ -172,15 +172,15 @@ def test_user_stats_match_hand_counted_changes(tmp_path, osc_factory, changefile
     r = rows[0]
     assert r["name"] == "alice"
     assert r["changesets"] == 1
-    assert r["nodes_create"] == 5
-    assert r["nodes_modify"] == 2
-    assert r["nodes_delete"] == 1
-    assert r["ways_create"] == 3
-    assert r["ways_modify"] == 1
-    assert r["ways_delete"] == 0
-    assert r["rels_create"] == 1
-    assert r["poi_create"] == 3
-    assert r["poi_modify"] == 1
+    assert r["nodes_created"] == 5
+    assert r["nodes_modified"] == 2
+    assert r["nodes_deleted"] == 1
+    assert r["ways_created"] == 3
+    assert r["ways_modified"] == 1
+    assert r["ways_deleted"] == 0
+    assert r["rels_created"] == 1
+    assert r["poi_created"] == 3
+    assert r["poi_modified"] == 1
     # map_changes is the sum of the nine element columns, never the POI ones.
     assert r["map_changes"] == 5 + 2 + 1 + 3 + 1 + 0 + 1 + 0 + 0
 
@@ -221,8 +221,8 @@ def test_processing_same_file_twice_yields_identical_stats(tmp_path, osc_factory
     rows = user_stats(db)
     assert len(rows) == 1
     alice = rows[0]
-    assert alice["nodes_create"] == 2
-    assert alice["ways_create"] == 1
+    assert alice["nodes_created"] == 2
+    assert alice["ways_created"] == 1
     assert alice["map_changes"] == 3  # 2 + 1
     assert alice["changesets"] == 1
 
@@ -270,7 +270,7 @@ def test_multi_worker_pipeline_matches_single_worker(tmp_path, osc_factory, chan
 
     assert len(serial) == len(parallel) == 2
     for sr, pr in zip(serial, parallel, strict=True):
-        for k in ("uid", "name", "changesets", "nodes_create", "ways_create", "map_changes", "poi_create"):
+        for k in ("uid", "name", "changesets", "nodes_created", "ways_created", "map_changes", "poi_created"):
             assert sr[k] == pr[k], f"mismatch on {k}: serial={sr[k]} parallel={pr[k]}"
 
 
@@ -305,9 +305,9 @@ def test_changeset_spread_across_files_aggregates(tmp_path, osc_factory, changef
     assert len(rows) == 1
     alice = rows[0]
     assert alice["changesets"] == 2  # COUNT(DISTINCT changeset_id)
-    assert alice["nodes_create"] == 2  # 1 from each file
-    assert alice["ways_create"] == 1  # only in f2
-    assert alice["poi_create"] == 1  # only the tagged node
+    assert alice["nodes_created"] == 2  # 1 from each file
+    assert alice["ways_created"] == 1  # only in f2
+    assert alice["poi_created"] == 1  # only the tagged node
     assert alice["map_changes"] == 3
 
 
@@ -344,8 +344,8 @@ def test_every_uid_in_input_appears_in_user_stats(tmp_path, osc_factory, changef
     assert len(rows) == 10
     assert {r["name"] for r in rows} == {f"user{i}" for i in range(10)}
     assert {r["uid"] for r in rows} == {100 + i for i in range(10)}
-    # Every user should have exactly 1 changeset, 1 poi_create
-    assert all(r["changesets"] == 1 and r["poi_create"] == 1 for r in rows)
+    # Every user should have exactly 1 changeset, 1 poi_created
+    assert all(r["changesets"] == 1 and r["poi_created"] == 1 for r in rows)
 
 
 # 6) Different-pid worker shards are all picked up by merge
@@ -377,8 +377,8 @@ def test_merge_picks_up_every_worker_shard(tmp_path, osc_factory, changefile_con
     rows = user_stats(db)
     assert len(rows) == 1
     assert rows[0]["changesets"] == 1  # COUNT(DISTINCT changeset_id), not COUNT(*)
-    # nodes_create sums across all 8 shards
-    assert rows[0]["nodes_create"] == 8
+    # nodes_created sums across all 8 shards
+    assert rows[0]["nodes_created"] == 8
 
 
 # 7) Hashtag pipeline ground-truth, the user-facing guarantee that motivates this tool.
@@ -493,21 +493,21 @@ def test_hashtag_pipeline_end_to_end_no_contribution_lost(tmp_path, osc_factory,
     )
 
     assert by_user["alice"]["changesets"] == 1
-    assert by_user["alice"]["nodes_create"] == 2
-    assert by_user["alice"]["ways_create"] == 1
-    assert by_user["alice"]["poi_create"] == 1
+    assert by_user["alice"]["nodes_created"] == 2
+    assert by_user["alice"]["ways_created"] == 1
+    assert by_user["alice"]["poi_created"] == 1
     assert by_user["alice"]["map_changes"] == 3
 
     assert by_user["bob"]["changesets"] == 1
-    assert by_user["bob"]["nodes_create"] == 1
-    assert by_user["bob"]["nodes_modify"] == 1
-    assert by_user["bob"]["ways_delete"] == 1
-    assert by_user["bob"]["poi_create"] == 1
-    assert by_user["bob"]["poi_modify"] == 1
+    assert by_user["bob"]["nodes_created"] == 1
+    assert by_user["bob"]["nodes_modified"] == 1
+    assert by_user["bob"]["ways_deleted"] == 1
+    assert by_user["bob"]["poi_created"] == 1
+    assert by_user["bob"]["poi_modified"] == 1
     assert by_user["bob"]["map_changes"] == 3
 
     assert by_user["carol"]["changesets"] == 1
-    assert by_user["carol"]["rels_create"] == 1
+    assert by_user["carol"]["rels_created"] == 1
     assert by_user["carol"]["map_changes"] == 1
 
     attach_metadata(db, rows)

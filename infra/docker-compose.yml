@@ -39,9 +39,9 @@ services:
       resources:
         limits:
           cpus: "0.30"
-          memory: 256M
+          memory: 512M
         reservations:
-          memory: 64M
+          memory: 128M
     restart: unless-stopped
 
   worker:
@@ -54,9 +54,14 @@ services:
       OSM_USERNAME: ${OSM_USERNAME:-}
       OSM_PASSWORD: ${OSM_PASSWORD:-}
       OSMSG_EXTRA_ARGS: ${OSMSG_EXTRA_ARGS:-}
+      OSMSG_DUCKDB_MEMORY_LIMIT: ${OSMSG_DUCKDB_MEMORY_LIMIT:-1GB}
+      OSMSG_DUCKDB_THREADS: ${OSMSG_DUCKDB_THREADS:-2}
+      OSMSG_DUCKDB_TEMP_DIR: ${OSMSG_DUCKDB_TEMP_DIR:-/var/cache/osmsg/duckdb-tmp}
     volumes:
       - osmsg-data:/var/lib/osmsg
       - osmsg-cache:/var/cache/osmsg
+    ulimits:
+      core: 0
     depends_on:
       db:
         condition: service_healthy

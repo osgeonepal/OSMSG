@@ -32,6 +32,7 @@ def month_cmd(
     from ..exceptions import OsmsgError
     from .manifest import bump_manifest
     from .month import ensure_complete_month, export_month, generate_month, upload, verify_month_complete
+    from .rollup import build_month_rollups
 
     year, month = (int(x) for x in ym.split("-"))
     ensure_complete_month(year, month)
@@ -43,7 +44,8 @@ def month_cmd(
             error(str(exc))
             raise typer.Exit(code=2) from exc
     cf, cs = export_month(db, year, month, output_dir)
-    info(f"{ym}: changefiles={cf:,} changesets={cs:,} -> {output_dir}")
+    build_month_rollups(year, month, output_dir)
+    info(f"{ym}: changefiles={cf:,} changesets={cs:,}, rollups built -> {output_dir}")
     if no_upload:
         console.print(f"Generated locally. Upload with: osmsg maintain publish {output_dir} --repo <repo>")
         return

@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from ..db.schema import create_tables
+from ..stats import TAG_STRUCT_DDL
 from .parquet import GEOM_COLS, MORTON_MACROS, write_partitions
 from .pbf_split import split_pbf
 
@@ -201,6 +202,7 @@ def build_tables(con: duckdb.DuckDBPyConnection, work: pathlib.Path) -> None:
               a.ways_created, a.ways_modified, a.ways_deleted,
               a.rels_created, a.rels_modified, a.rels_deleted,
               a.poi_created, a.poi_modified"""
+    empty_tags = f"[]::{TAG_STRUCT_DDL}[]"
     for b in range(TAG_SHARDS):
         shard_dir = shards / f"shard={b}"
         if shard_dir.is_dir():
@@ -212,23 +214,19 @@ def build_tables(con: duckdb.DuckDBPyConnection, work: pathlib.Path) -> None:
                                count(*) FILTER (action=0) c, count(*) FILTER (action=1) m
                         FROM read_parquet('{shard_glob}') GROUP BY changeset_id, tag_key, tag_value
                     ),
-                    byval AS (
-                        SELECT changeset_id, tag_key,
-                               json_group_object(tag_value, json_object('c', c, 'm', m)) vals
-                        FROM t GROUP BY changeset_id, tag_key
-                    ),
                     ts AS (
-                        SELECT changeset_id, json_group_object(tag_key, vals) AS tag_stats
-                        FROM byval GROUP BY changeset_id
+                        SELECT changeset_id, list(struct_pack(
+                                   k := tag_key, v := tag_value, c := c, m := m, len_m := NULL::double)) AS tags
+                        FROM t GROUP BY changeset_id
                     )
-                    SELECT a.changeset_id, 0 AS seq_id, a.uid, {cols}, ts.tag_stats
+                    SELECT a.changeset_id, 0 AS seq_id, a.uid, {cols}, COALESCE(ts.tags, {empty_tags}) AS tags
                     FROM agg a LEFT JOIN ts USING (changeset_id)
                     WHERE a.changeset_id % {TAG_SHARDS} = {b}"""
             )
         else:
             con.execute(
                 f"""INSERT INTO changeset_stats
-                    SELECT a.changeset_id, 0 AS seq_id, a.uid, {cols}, NULL AS tag_stats
+                    SELECT a.changeset_id, 0 AS seq_id, a.uid, {cols}, {empty_tags} AS tags
                     FROM agg a WHERE a.changeset_id % {TAG_SHARDS} = {b}"""
             )
     shutil.rmtree(shards, ignore_errors=True)
@@ -237,14 +235,27 @@ def build_tables(con: duckdb.DuckDBPyConnection, work: pathlib.Path) -> None:
 def export_parquet(con: duckdb.DuckDBPyConnection, out: pathlib.Path) -> None:
     """Materialise the two datasets as persisted tables, then write Morton-sorted partitions."""
     con.execute(MORTON_MACROS)
+    # changefiles is published with tag_stats as JSON (the archival wire form); convert the store's
+    # native `tags` back to that shape, set-based (grouped, not correlated) so the export stays fast.
+    con.execute(
+        """CREATE TABLE cf_tags AS
+            SELECT changeset_id, json_group_object(k, vals) AS tag_stats FROM (
+                SELECT changeset_id, t.k AS k,
+                       json_group_object(t.v, CASE WHEN t.len_m IS NULL THEN json_object('c', t.c, 'm', t.m)
+                                                   ELSE json_object('c', t.c, 'm', t.m, 'len', t.len_m) END) AS vals
+                FROM (SELECT changeset_id, UNNEST(tags) AS t FROM changeset_stats WHERE len(tags) > 0)
+                GROUP BY changeset_id, t.k
+            ) GROUP BY changeset_id"""
+    )
     con.execute(
         f"""CREATE TABLE changefiles_all AS
-            SELECT s.* EXCLUDE (seq_id),
+            SELECT s.* EXCLUDE (seq_id, tags), cft.tag_stats,
                    COALESCE(c.created_at, a.edited_at) AS created_at, {GEOM_COLS},
                    year(COALESCE(c.created_at, a.edited_at)) y, month(COALESCE(c.created_at, a.edited_at)) m
             FROM changeset_stats s
             JOIN agg a USING (changeset_id)
-            LEFT JOIN changesets c USING (changeset_id)"""
+            LEFT JOIN changesets c USING (changeset_id)
+            LEFT JOIN cf_tags cft USING (changeset_id)"""
     )
     con.execute(
         f"""CREATE TABLE changesets_all AS

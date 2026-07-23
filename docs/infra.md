@@ -107,22 +107,32 @@ docker image prune -af && docker builder prune -af
 
 ## API
 
+All-time hashtag stats, combining the published history rollup with the live tail at query time (see
+`docs/rollups.md`).
+
 ```text
 GET /health
-GET /api/v1/stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&tags=true|false][&tag_mode=keys|all][&limit=N][&offset=N]
-GET /api/v1/hashtag-stats?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&interval=day|week|month][&limit=N][&offset=N]
-GET /api/v1/editor-stats?start=<ISO8601>&end=<ISO8601>[&include_version=true|false][&limit=N][&offset=N]
-GET /api/v1/map?start=<ISO8601>&end=<ISO8601>[&hashtag=<tag>][&limit=N][&offset=N]
+GET /api/v2/hashtag/{hashtag}/summary[?start=<ISO8601>&end=<ISO8601>]
+GET /api/v2/hashtag/{hashtag}/leaderboard[?limit=N&offset=N&start=<ISO8601>&end=<ISO8601>]
+GET /api/v2/hashtag/{hashtag}/tags[?limit=N&start=<ISO8601>&end=<ISO8601>]
+GET /api/v2/hashtag/{hashtag}/editors[?start=<ISO8601>&end=<ISO8601>]
+GET /api/v2/hashtag/{hashtag}/trends[?interval=day|week|month&start=<ISO8601>&end=<ISO8601>]
+GET /api/v2/hashtag/{hashtag}/map[?limit=N&start=<ISO8601>&end=<ISO8601>]
 GET /docs/swagger
 ```
 
-`tags=true&tag_mode=keys` (the default) returns compact per-key totals. Use
-`tag_mode=all` to opt in to the full key/value breakdown, or `tags=false` to skip
-JSONB expansion for cheaper responses. Editor stats group versions into editor
-families by default; use `include_version=true` for full version strings. Collection
-responses include a Litestar `OffsetPagination` object with `items`, `limit`,
-`offset`, and `total`. Map
-features use centroid Point geometry only, ready for clustering and heatmaps.
+`{hashtag}` is matched as a prefix (`hotosm` covers `#hotosm-project-1`, `#hotosm-fanclub`, …), deduped
+by changeset so a changeset carrying two matching hashtags counts once. Pass several comma-separated
+(`/hashtag/hotosm,osmnepal/summary`) to scope to the union of them; a changeset tagged with more than
+one still counts once. `summary` returns totals (users, changesets, the element breakdown,
+map_changes); `leaderboard` ranks contributors by map changes with their editors; `tags` is the
+key/value breakdown; `editors` is the editor breakdown. Every endpoint accepts an optional half-open
+`[start, end)` UTC window; omit both for all-time. The window intersects the history/live split, so a
+range before the published frontier reads only the history rollup, a range after it reads only the live
+tail, and a straddling range reads both. `trends` buckets by day, week, or month. `map` returns a
+GeoJSON FeatureCollection of changeset centroids (Point) for clustering/heatmaps, up to `limit`; its
+history side needs the `lon`/`lat` columns that the rollup gained with this feature, so an all-time map
+requires a rollup rebuilt by `maintain` (the recent tail maps immediately from the base bbox).
 
 ## Run the API standalone (without compose)
 

@@ -70,9 +70,9 @@ def summary_markdown(
     def _sum(*cols: str) -> int:
         return sum(sum(int(r.get(c, 0) or 0) for c in cols) for r in rows)
 
-    created = _sum("nodes_create", "ways_create", "rels_create")
-    modified = _sum("nodes_modify", "ways_modify", "rels_modify")
-    deleted = _sum("nodes_delete", "ways_delete", "rels_delete")
+    created = _sum("nodes_created", "ways_created", "rels_created")
+    modified = _sum("nodes_modified", "ways_modified", "rels_modified")
+    deleted = _sum("nodes_deleted", "ways_deleted", "rels_deleted")
 
     parts: list[str] = []
     parts.append(f"### Stats from {start_date} to {end_date} (UTC)\n")
@@ -86,10 +86,10 @@ def summary_markdown(
         ("name", "name"),
         ("changesets", "changesets"),
         ("map_changes", "map changes"),
-        ("nodes_create", "nodes created"),
-        ("ways_create", "ways created"),
-        ("rels_create", "rels created"),
-        ("poi_create", "poi created"),
+        ("nodes_created", "nodes created"),
+        ("ways_created", "ways created"),
+        ("rels_created", "rels created"),
+        ("poi_created", "poi created"),
         ("hashtags", "hashtags"),
     )
     parts.append("| " + " | ".join(label for _, label in user_cols) + " |")
@@ -114,8 +114,8 @@ def summary_markdown(
         for r in sorted(rows, key=lambda x: -(x.get("tasks_mapped", 0) or 0))[:5]:
             parts.append(f"- {r['name']}: {_human(int(r.get('tasks_mapped', 0) or 0))} tasks mapped")
 
-    poi_c = sum(int(r.get("poi_create", 0) or 0) for r in rows)
-    poi_m = sum(int(r.get("poi_modify", 0) or 0) for r in rows)
+    poi_c = sum(int(r.get("poi_created", 0) or 0) for r in rows)
+    poi_m = sum(int(r.get("poi_modified", 0) or 0) for r in rows)
     parts.append(f"\n- poi: created {_human(poi_c)}, modified {_human(poi_m)}")
     for k in additional_tags or []:
         c = sum(int(r.get(f"{k}_create", 0) or 0) for r in rows)

@@ -33,12 +33,16 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
+WORKDIR /app
+
+COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv /app/.venv && \
-    uv pip install --python /app/.venv \
-        "litestar[standard,pydantic]>=2.18.0" \
-        "asyncpg>=0.30.0" \
-        "python-dotenv>=1.2.2"
+    uv sync --frozen --no-install-project --no-dev --group api
+
+COPY osmsg /app/osmsg
+COPY api /app/api
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --group api
 
 RUN find /app/.venv -type d -name __pycache__ -exec rm -rf {} +
 

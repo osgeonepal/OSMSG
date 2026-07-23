@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from osmsg.db.ingest import _sql_escape
 from osmsg.db.queries import attach_metadata, attach_tag_stats, daily_summary, user_stats
+
+
+def _tags_literal(nested: dict) -> str:
+    """A {key: {value: {c, m[, len]}}} dict as a DuckDB STRUCT(k,v,c,m,len_m)[] literal (test helper)."""
+    parts = []
+    for key, by_value in nested.items():
+        for value, s in by_value.items():
+            len_m = "NULL" if s.get("len") is None else repr(s["len"])
+            parts.append(f"{{'k':'{key}','v':'{value}','c':{s['c']},'m':{s['m']},'len_m':{len_m}}}")
+    return "[" + ", ".join(parts) + "]"
 
 
 def test_sql_escape_doubles_single_quotes():
@@ -32,18 +40,17 @@ def populated_db(fresh_db):
             (3, 20, '2026-04-02 09:00:00+00', NULL, 'JOSM', NULL)
         """
     )
-    tag_stats_alice = json.dumps(
+    tags_alice = _tags_literal(
         {"building": {"yes": {"c": 5, "m": 1}}, "highway": {"residential": {"c": 2, "m": 0, "len": 120.6}}}
     )
-    tag_stats_bob = json.dumps({"natural": {"tree": {"c": 10, "m": 0}}})
+    tags_bob = _tags_literal({"natural": {"tree": {"c": 10, "m": 0}}})
     conn.execute(
-        """
+        f"""
         INSERT INTO changeset_stats VALUES
-            (1, 100, 10, 30, 5, 0, 8, 1, 0, 0, 0, 0, 5, 1, ?),
-            (2, 101, 10, 10, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, NULL),
-            (3, 102, 20, 50, 0, 0, 0, 0, 0, 0, 0, 0, 50, 0, ?)
-        """,
-        [tag_stats_alice, tag_stats_bob],
+            (1, 100, 10, 30, 5, 0, 8, 1, 0, 0, 0, 0, 5, 1, {tags_alice}),
+            (2, 101, 10, 10, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, []),
+            (3, 102, 20, 50, 0, 0, 0, 0, 0, 0, 0, 0, 50, 0, {tags_bob})
+        """
     )
     return conn
 
@@ -55,19 +62,19 @@ def test_user_stats_aggregates_across_changesets_per_user(populated_db):
     alice = next(r for r in rows if r["name"] == "alice")
     assert alice["uid"] == 10
     assert alice["changesets"] == 2
-    assert alice["nodes_create"] == 40  # 30 + 10
-    assert alice["ways_create"] == 12  # 8 + 4
-    assert alice["poi_create"] == 5
+    assert alice["nodes_created"] == 40  # 30 + 10
+    assert alice["ways_created"] == 12  # 8 + 4
+    assert alice["poi_created"] == 5
     assert alice["map_changes"] == (
-        alice["nodes_create"]
-        + alice["nodes_modify"]
-        + alice["nodes_delete"]
-        + alice["ways_create"]
-        + alice["ways_modify"]
-        + alice["ways_delete"]
-        + alice["rels_create"]
-        + alice["rels_modify"]
-        + alice["rels_delete"]
+        alice["nodes_created"]
+        + alice["nodes_modified"]
+        + alice["nodes_deleted"]
+        + alice["ways_created"]
+        + alice["ways_modified"]
+        + alice["ways_deleted"]
+        + alice["rels_created"]
+        + alice["rels_modified"]
+        + alice["rels_deleted"]
     )
 
 

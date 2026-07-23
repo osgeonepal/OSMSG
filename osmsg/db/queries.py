@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import duckdb
+
+from ..stats import map_changes_sum, sum_cols
 
 
 def _rows(result) -> list[dict[str, Any]]:
@@ -13,31 +14,29 @@ def _rows(result) -> list[dict[str, Any]]:
     return [dict(zip(cols, r, strict=True)) for r in result.fetchall()]
 
 
+def _tags_to_nested(tags: list[dict[str, Any]] | None) -> dict[str, dict[str, dict[str, Any]]]:
+    """The native `tags` list (list of {k, v, c, m, len_m}) as the nested {key: {value: {c, m, len}}}
+    shape `_accumulate_tags` sums over. len is omitted when absent, matching the JSON wire form."""
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for t in tags or []:
+        entry: dict[str, Any] = {"c": t["c"], "m": t["m"]}
+        if t["len_m"] is not None:
+            entry["len"] = t["len_m"]
+        out.setdefault(t["k"], {})[t["v"]] = entry
+    return out
+
+
 def user_stats(conn: duckdb.DuckDBPyConnection, top_n: int | None = None) -> list[dict[str, Any]]:
-    """One row per user, ranked by total map changes."""
+    """One row per user, ranked by total map changes. Counts come from the shared stats vocabulary."""
     rows = _rows(
         conn.execute(
-            """
+            f"""
             SELECT
                 u.uid,
                 u.username                                  AS name,
                 COUNT(DISTINCT cs.changeset_id)             AS changesets,
-                SUM(cs.nodes_created)                       AS nodes_create,
-                SUM(cs.nodes_modified)                      AS nodes_modify,
-                SUM(cs.nodes_deleted)                       AS nodes_delete,
-                SUM(cs.ways_created)                        AS ways_create,
-                SUM(cs.ways_modified)                       AS ways_modify,
-                SUM(cs.ways_deleted)                        AS ways_delete,
-                SUM(cs.rels_created)                        AS rels_create,
-                SUM(cs.rels_modified)                       AS rels_modify,
-                SUM(cs.rels_deleted)                        AS rels_delete,
-                SUM(cs.poi_created)                         AS poi_create,
-                SUM(cs.poi_modified)                        AS poi_modify,
-                SUM(
-                    cs.nodes_created + cs.nodes_modified + cs.nodes_deleted +
-                    cs.ways_created  + cs.ways_modified  + cs.ways_deleted  +
-                    cs.rels_created  + cs.rels_modified  + cs.rels_deleted
-                )                                           AS map_changes
+                {sum_cols("cs")},
+                {map_changes_sum("cs")}
             FROM users u
             JOIN changeset_stats cs ON u.uid = cs.uid
             GROUP BY u.uid, u.username
@@ -138,18 +137,14 @@ def attach_tag_stats(
         for k in length_tags or []:
             r.setdefault(f"{k}_len_m", 0)
 
-    for uid, tag_stats_json in conn.execute(
-        "SELECT uid, tag_stats FROM changeset_stats WHERE tag_stats IS NOT NULL"
+    for uid, tags in conn.execute(
+        "SELECT uid, tags FROM changeset_stats WHERE tags IS NOT NULL AND len(tags) > 0"
     ).fetchall():
-        if uid not in by_uid or not tag_stats_json:
-            continue
-        try:
-            payload = json.loads(tag_stats_json) if isinstance(tag_stats_json, str) else tag_stats_json
-        except (json.JSONDecodeError, TypeError):
+        if uid not in by_uid or not tags:
             continue
         _accumulate_tags(
             by_uid[uid],
-            payload,
+            _tags_to_nested(tags),
             additional_tags=additional_tags,
             tag_mode=tag_mode,
             length_tags=length_tags,
@@ -171,27 +166,13 @@ def daily_summary(
     """One row per UTC day. Requires `changesets` populated (--changeset / --hashtags)."""
     rows = _rows(
         conn.execute(
-            """
+            f"""
             SELECT
                 CAST(DATE_TRUNC('day', cs.created_at) AS DATE)::VARCHAR AS date,
                 COUNT(DISTINCT cs.changeset_id) AS changesets,
                 COUNT(DISTINCT cs.uid)          AS users,
-                SUM(st.nodes_created)           AS nodes_create,
-                SUM(st.nodes_modified)          AS nodes_modify,
-                SUM(st.nodes_deleted)           AS nodes_delete,
-                SUM(st.ways_created)            AS ways_create,
-                SUM(st.ways_modified)           AS ways_modify,
-                SUM(st.ways_deleted)            AS ways_delete,
-                SUM(st.rels_created)            AS rels_create,
-                SUM(st.rels_modified)           AS rels_modify,
-                SUM(st.rels_deleted)            AS rels_delete,
-                SUM(st.poi_created)             AS poi_create,
-                SUM(st.poi_modified)            AS poi_modify,
-                SUM(
-                    st.nodes_created + st.nodes_modified + st.nodes_deleted +
-                    st.ways_created  + st.ways_modified  + st.ways_deleted  +
-                    st.rels_created  + st.rels_modified  + st.rels_deleted
-                )                               AS map_changes
+                {sum_cols("st")},
+                {map_changes_sum("st")}
             FROM changesets cs
             JOIN changeset_stats st ON cs.changeset_id = st.changeset_id
             GROUP BY DATE_TRUNC('day', cs.created_at)
@@ -227,22 +208,18 @@ def daily_summary(
         for k in length_tags or []:
             r.setdefault(f"{k}_len_m", 0)
 
-    for date, tag_stats_json in conn.execute(
+    for date, tags in conn.execute(
         """
-        SELECT CAST(DATE_TRUNC('day', cs.created_at) AS DATE)::VARCHAR, st.tag_stats
+        SELECT CAST(DATE_TRUNC('day', cs.created_at) AS DATE)::VARCHAR, st.tags
         FROM changesets cs JOIN changeset_stats st ON cs.changeset_id = st.changeset_id
-        WHERE st.tag_stats IS NOT NULL
+        WHERE st.tags IS NOT NULL AND len(st.tags) > 0
         """
     ).fetchall():
-        if date not in by_date or not tag_stats_json:
-            continue
-        try:
-            payload = json.loads(tag_stats_json) if isinstance(tag_stats_json, str) else tag_stats_json
-        except (json.JSONDecodeError, TypeError):
+        if date not in by_date or not tags:
             continue
         _accumulate_tags(
             by_date[date],
-            payload,
+            _tags_to_nested(tags),
             additional_tags=additional_tags,
             tag_mode=tag_mode,
             length_tags=length_tags,

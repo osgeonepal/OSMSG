@@ -4,7 +4,7 @@ import os
 import asyncpg
 from dotenv import load_dotenv
 
-from .pg_schema import PG_SCHEMA
+from .pg_schema import PG_SCHEMA, PG_TAG_TYPE_EXISTS_SQL, PG_TAG_TYPE_SQL
 
 load_dotenv()
 
@@ -45,5 +45,7 @@ def get_pool() -> asyncpg.Pool:
 async def ensure_schema() -> None:
     statements = [s.strip() for s in PG_SCHEMA.strip().split(";") if s.strip()]
     async with get_pool().acquire() as conn:
+        if await conn.fetchval(PG_TAG_TYPE_EXISTS_SQL) is None:  # the tags column depends on this type
+            await conn.execute(PG_TAG_TYPE_SQL)
         for stmt in statements:
             await conn.execute(stmt)

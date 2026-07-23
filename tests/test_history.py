@@ -170,8 +170,8 @@ def _by_name(rows):
 def test_ingest_no_filter_parity(tmp_path: Path):
     conn = _ingest(tmp_path, RemoteFilters(None, False, None, None))
     rows = _by_name(user_stats(conn))
-    assert rows["alice"]["nodes_create"] == 5 and rows["alice"]["ways_create"] == 3  # cs100 + cs300
-    assert rows["bob"]["nodes_create"] == 3
+    assert rows["alice"]["nodes_created"] == 5 and rows["alice"]["ways_created"] == 3  # cs100 + cs300
+    assert rows["bob"]["nodes_created"] == 3
     # changeset_stats carries history sentinel seq_id
     assert conn.execute("SELECT count(*) FROM changeset_stats WHERE seq_id=0").fetchone()[0] == 3
 
@@ -192,7 +192,7 @@ def test_ingest_hashtag_filter(tmp_path: Path):
     conn = _ingest(tmp_path, RemoteFilters(["#hotosm"], False, None, None))
     rows = _by_name(user_stats(conn))
     assert set(rows) == {"alice"}
-    assert rows["alice"]["nodes_create"] == 5 and rows["alice"]["ways_create"] == 1  # only cs100
+    assert rows["alice"]["nodes_created"] == 5 and rows["alice"]["ways_created"] == 1  # only cs100
 
 
 def test_ingest_boundary_filter(tmp_path: Path):
@@ -200,13 +200,13 @@ def test_ingest_boundary_filter(tmp_path: Path):
     conn = _ingest(tmp_path, RemoteFilters(None, False, None, berlin))
     rows = _by_name(user_stats(conn))
     assert set(rows) == {"alice"}  # cs100 + cs300 are in Berlin; cs200 (bob) at (0,0) excluded
-    assert rows["alice"]["ways_create"] == 3
+    assert rows["alice"]["ways_created"] == 3
 
 
 def test_ingest_users_filter(tmp_path: Path):
     conn = _ingest(tmp_path, RemoteFilters(None, False, ["bob"], None))
     rows = _by_name(user_stats(conn))
-    assert set(rows) == {"bob"} and rows["bob"]["nodes_create"] == 3
+    assert set(rows) == {"bob"} and rows["bob"]["nodes_created"] == 3
 
 
 def test_history_dedup_drops_live_duplicate(tmp_path: Path):
@@ -219,7 +219,7 @@ def test_history_dedup_drops_live_duplicate(tmp_path: Path):
     )
     rows = _by_name(user_stats(conn))
     # alice's cs100 nodes stay 5 (history), not 5+99 -> live dup removed, no double count
-    assert rows["alice"]["nodes_create"] == 5
+    assert rows["alice"]["nodes_created"] == 5
 
 
 if __name__ == "__main__":

@@ -146,7 +146,8 @@ litestar --app api.app:app run --host 0.0.0.0 --port 8000
 
 ```text
 GET /health
-GET /api/v1/user-stats?start=2026-05-01T00:00:00Z&end=2026-05-02T00:00:00Z
+GET /api/v2/hashtag/hotosm/summary
+GET /api/v2/hashtag/hotosm/leaderboard
 GET /docs
 ```
 

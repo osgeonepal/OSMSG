@@ -97,6 +97,7 @@ class RunConfig:
     history_mode: str = "auto"  # auto | off
     history_url: str = "hf://datasets/kshitijrajsharma/osmsg-history"
     insert: bool = False
+    seed_only: bool = False
     osh_file: str | None = None
     changeset_file: str | None = None
     overwrite: bool = False
@@ -317,9 +318,34 @@ def _convert_local(cfg: RunConfig) -> tuple[str, WindowSplit]:
     return out.as_posix(), WindowSplit(remote_start=start, remote_end=cfg.end_date, live_start=cfg.end_date)
 
 
+def _run_seed_only(cfg: RunConfig, conn: duckdb.DuckDBPyConnection, db_path: Path) -> dict[str, Any]:
+    """Seed resume state at the published frontier without ingesting any history: the history stays in
+    the remote dataset and the local store only ever holds the live tail a later --update catches up."""
+    manifest = fetch_manifest(cfg.history_url)
+    if manifest is None:
+        raise OsmsgError("history: dataset manifest unavailable, cannot seed resume state (check --history-url).")
+    # Seed only the planet source; the changeset-metadata stream aligns to it during --update.
+    gap = dt.datetime.now(UTC) - manifest.frontier
+    planet_urls = cfg.urls if cfg.url_explicit else [resolve_url(_pick_replication_for_span(gap))]
+    for url in planet_urls:
+        seed_resume_state(conn, cfg.history_url, url)
+    info(
+        f"insert: seed-only, resume seeded at frontier {manifest.frontier.astimezone(UTC).isoformat()}; "
+        "history stays remote, --update will catch up the live tail."
+    )
+    written: dict[str, str] = {"duckdb": str(db_path)}
+    if cfg.psql_dsn:
+        to_psql(conn, cfg.psql_dsn, bulk_load=True)
+        written["psql"] = cfg.psql_dsn
+    dbmod.close(conn)
+    return {"rows": 0, "files": written, "rows_data": [], "summary": None, "start_seq": None, "end_seq": None}
+
+
 def _run_insert(cfg: RunConfig, conn: duckdb.DuckDBPyConnection, db_path: Path) -> dict[str, Any]:
     """Populate the store from history (published parquet or a local .osh), seed resume state so a later
     --update continues, and push to Postgres when a DSN is set. No live diffs, no leaderboard export."""
+    if cfg.seed_only:
+        return _run_seed_only(cfg, conn, db_path)
     filters = RemoteFilters(
         hashtags=cfg.hashtags,
         exact_lookup=cfg.exact_lookup,

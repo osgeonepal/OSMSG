@@ -30,9 +30,14 @@ def test_pg_schema_contains_every_osmsg_table():
     assert {"users", "changesets", "changeset_stats", "state"} <= table_names
 
 
-def test_pg_schema_uses_jsonb_for_tag_stats():
-    """JSONB (binary, indexable) is the right PG type for tag_stats."""
-    assert "tag_stats      JSONB" in PG_SCHEMA
+def test_pg_schema_uses_native_tag_type():
+    """Tags are stored as the native osmsg_tag composite array, not JSON, so the representation matches
+    the DuckDB store and the rollup (one tag path everywhere queried)."""
+    from api.pg_schema import PG_TAG_TYPE_SQL
+
+    assert "tags           osmsg_tag[]" in PG_SCHEMA
+    assert "JSONB" not in PG_SCHEMA
+    assert "CREATE TYPE osmsg_tag AS (k text, v text, c bigint, m bigint, len_m double precision)" in PG_TAG_TYPE_SQL
 
 
 def test_pg_schema_state_is_single_row_per_source():
@@ -46,7 +51,11 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
     """Each individual CREATE statement is well-formed enough that the postgres
     extension's parser would accept it, we use DuckDB's own parser as an
     approximation (DuckDB's CREATE TABLE syntax is compatible)."""
-    duckdb_clone = PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE").replace("JSONB", "JSON").replace("TEXT", "VARCHAR")
+    duckdb_clone = (
+        PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
+        .replace("osmsg_tag[]", "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]")
+        .replace("TEXT", "VARCHAR")
+    )
     conn = duckdb.connect(":memory:")
     conn.execute("INSTALL spatial")
     conn.execute("LOAD spatial")
@@ -68,8 +77,8 @@ def test_pg_schema_uses_explicit_postgres_index_types():
 
 
 EXPECTED_USER_STATS = {
-    "alice": {"changesets": 1, "nodes_create": 30, "ways_create": 8, "poi_create": 5, "map_changes": 44},
-    "bob": {"changesets": 1, "nodes_create": 50, "ways_create": 0, "poi_create": 50, "map_changes": 50},
+    "alice": {"changesets": 1, "nodes_created": 30, "ways_created": 8, "poi_created": 5, "map_changes": 44},
+    "bob": {"changesets": 1, "nodes_created": 50, "ways_created": 0, "poi_created": 50, "map_changes": 50},
 }
 
 
@@ -126,9 +135,9 @@ def test_user_stats_roundtrip_through_postgres(fresh_db, populated_db_factory):
             """
             SELECT u.username AS name,
                    COUNT(DISTINCT cs.changeset_id) AS changesets,
-                   SUM(cs.nodes_created) AS nodes_create,
-                   SUM(cs.ways_created)  AS ways_create,
-                   SUM(cs.poi_created)   AS poi_create,
+                   SUM(cs.nodes_created) AS nodes_created,
+                   SUM(cs.ways_created)  AS ways_created,
+                   SUM(cs.poi_created)   AS poi_created,
                    SUM(
                        cs.nodes_created + cs.nodes_modified + cs.nodes_deleted +
                        cs.ways_created  + cs.ways_modified  + cs.ways_deleted  +
@@ -143,7 +152,7 @@ def test_user_stats_roundtrip_through_postgres(fresh_db, populated_db_factory):
         verifier.execute("DETACH pg_src")
         verifier.close()
 
-    cols = ("name", "changesets", "nodes_create", "ways_create", "poi_create", "map_changes")
+    cols = ("name", "changesets", "nodes_created", "ways_created", "poi_created", "map_changes")
     actual = [dict(zip(cols, r, strict=True)) for r in rows]
     _assert_user_stats_match(actual, EXPECTED_USER_STATS)
 

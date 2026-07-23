@@ -3,7 +3,7 @@
 import duckdb
 
 from ..exceptions import OsmsgError
-from ..pg_schema import PG_SCHEMA
+from ..pg_schema import PG_SCHEMA, PG_TAG_TYPE_SQL
 
 _BULK_INDEXES = [
     ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets USING BTREE (created_at)"),
@@ -26,10 +26,13 @@ _BULK_FKS = [
 
 
 def _changeset_bbox_select(conn: duckdb.DuckDBPyConnection) -> str:
+    # Scope to the local store: after ATTACH, the pg_target.changesets columns (min_lon..) also match
+    # table_name='changesets' and would otherwise mask the local geom column.
     columns = {
         row[0]
         for row in conn.execute(
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'changesets'"
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'changesets' AND table_catalog = current_database()"
         ).fetchall()
     }
     if {"min_lon", "min_lat", "max_lon", "max_lat"}.issubset(columns):
@@ -53,7 +56,9 @@ _BULK_COMMIT_CHUNKS = 32
 
 
 def _pg(conn: duckdb.DuckDBPyConnection, sql: str) -> None:
-    conn.execute(f"CALL postgres_execute('pg_target', $${sql}$$)")
+    # A named dollar tag for the outer literal so a statement carrying its own $$ / $tag$ (the guarded
+    # CREATE TYPE) does not terminate the wrapper early.
+    conn.execute(f"CALL postgres_execute('pg_target', $osmsg_stmt${sql}$osmsg_stmt$)")
 
 
 def _pg_has_history(conn: duckdb.DuckDBPyConnection) -> bool:
@@ -120,6 +125,14 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
     safe_dsn = dsn.replace("'", "''")
     conn.execute(f"ATTACH '{safe_dsn}' AS pg_target (TYPE postgres)")
     try:
+        # The changeset_stats.tags column depends on this composite type. Create it as the first PG op
+        # (a fresh write transaction; a prior read would pin the connection read-only). On re-push the
+        # type already exists, which is the expected idempotent case; anything else is a real failure.
+        try:
+            _pg(conn, PG_TAG_TYPE_SQL)
+        except duckdb.Error as exc:
+            if "already exists" not in str(exc):
+                raise
         for stmt in PG_SCHEMA.strip().split(";"):
             stmt = stmt.strip()
             if stmt:
