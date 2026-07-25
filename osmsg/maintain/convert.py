@@ -159,7 +159,6 @@ def stream_changesets(dump: str, start: dt.datetime, end: dt.datetime, work: pat
 
 def build_tables(con: duckdb.DuckDBPyConnection, work: pathlib.Path) -> None:
     """Populate osmsg's tables (users, changesets, changeset_stats) from the streamed raw rows."""
-    con.execute("INSTALL json; LOAD json;")
     work = pathlib.Path(work)
     cs = (work / "raw_changesets.parquet").as_posix()
     elems = (work / "raw_elements_*.parquet").as_posix()
@@ -235,27 +234,14 @@ def build_tables(con: duckdb.DuckDBPyConnection, work: pathlib.Path) -> None:
 def export_parquet(con: duckdb.DuckDBPyConnection, out: pathlib.Path) -> None:
     """Materialise the two datasets as persisted tables, then write Morton-sorted partitions."""
     con.execute(MORTON_MACROS)
-    # changefiles is published with tag_stats as JSON (the archival wire form); convert the store's
-    # native `tags` back to that shape, set-based (grouped, not correlated) so the export stays fast.
-    con.execute(
-        """CREATE TABLE cf_tags AS
-            SELECT changeset_id, json_group_object(k, vals) AS tag_stats FROM (
-                SELECT changeset_id, t.k AS k,
-                       json_group_object(t.v, CASE WHEN t.len_m IS NULL THEN json_object('c', t.c, 'm', t.m)
-                                                   ELSE json_object('c', t.c, 'm', t.m, 'len', t.len_m) END) AS vals
-                FROM (SELECT changeset_id, UNNEST(tags) AS t FROM changeset_stats WHERE len(tags) > 0)
-                GROUP BY changeset_id, t.k
-            ) GROUP BY changeset_id"""
-    )
     con.execute(
         f"""CREATE TABLE changefiles_all AS
-            SELECT s.* EXCLUDE (seq_id, tags), cft.tag_stats,
+            SELECT s.* EXCLUDE (seq_id),
                    COALESCE(c.created_at, a.edited_at) AS created_at, {GEOM_COLS},
                    year(COALESCE(c.created_at, a.edited_at)) y, month(COALESCE(c.created_at, a.edited_at)) m
             FROM changeset_stats s
             JOIN agg a USING (changeset_id)
-            LEFT JOIN changesets c USING (changeset_id)
-            LEFT JOIN cf_tags cft USING (changeset_id)"""
+            LEFT JOIN changesets c USING (changeset_id)"""
     )
     con.execute(
         f"""CREATE TABLE changesets_all AS

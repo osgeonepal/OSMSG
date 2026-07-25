@@ -8,7 +8,7 @@ import duckdb
 
 from ..exceptions import OsmsgError
 from ..stats import COUNT_COLS as _COUNT_COLS
-from ..stats import map_changes_expr, tag_list_expr
+from ..stats import map_changes_expr
 from .parquet import ROW_GROUP_SIZE
 
 _MAP_CHANGES = map_changes_expr()
@@ -80,8 +80,6 @@ def build_month_rollups(year: int, month: int, out: pathlib.Path) -> None:
         raise OsmsgError(f"missing raw partition for {year:04d}-{month:02d}; export the month first")
 
     con = duckdb.connect()
-    con.execute("INSTALL json")
-    con.execute("LOAD json")
     con.execute(f"CREATE VIEW cf AS SELECT * FROM read_parquet('{changefiles}')")
     con.execute(f"CREATE VIEW cs AS SELECT * FROM read_parquet('{changesets}')")
 
@@ -107,7 +105,7 @@ def _refresh_hashtag_changeset(con: duckdb.DuckDBPyConnection, out: pathlib.Path
     con.execute(
         f"""CREATE TABLE month_hc AS
             SELECT lower(h) AS hashtag, cf.changeset_id, cf.uid, cs.editor, cf.created_at,
-                   {cf_counts}, {tag_list_expr("cf.tag_stats")} AS tags, cs.lon, cs.lat
+                   {cf_counts}, cf.tags, cs.lon, cs.lat
             FROM cf JOIN cs USING (changeset_id) CROSS JOIN UNNEST(cs.hashtags) AS t(h)
             WHERE cs.hashtags IS NOT NULL"""
     )

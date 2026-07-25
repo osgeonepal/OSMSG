@@ -41,8 +41,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY osmsg /app/osmsg
 COPY api /app/api
+# --no-editable so osmsg is copied into site-packages, not linked to /app/osmsg (absent in the final api stage).
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --group api
+    uv sync --frozen --no-dev --group api --no-editable
 
 RUN find /app/.venv -type d -name __pycache__ -exec rm -rf {} +
 
@@ -61,6 +62,11 @@ CMD ["--help"]
 
 
 FROM python:3.13-slim AS api
+
+# osmsg pulls in osmium (via the shared query surface), which needs libexpat at runtime.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder-api /app/.venv /app/.venv

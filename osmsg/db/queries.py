@@ -16,7 +16,7 @@ def _rows(result) -> list[dict[str, Any]]:
 
 def _tags_to_nested(tags: list[dict[str, Any]] | None) -> dict[str, dict[str, dict[str, Any]]]:
     """The native `tags` list (list of {k, v, c, m, len_m}) as the nested {key: {value: {c, m, len}}}
-    shape `_accumulate_tags` sums over. len is omitted when absent, matching the JSON wire form."""
+    shape `_accumulate_tags` sums over. len is omitted when absent."""
     out: dict[str, dict[str, dict[str, Any]]] = {}
     for t in tags or []:
         entry: dict[str, Any] = {"c": t["c"], "m": t["m"]}
@@ -120,7 +120,7 @@ def attach_tag_stats(
     tag_mode: str = "none",
     length_tags: list[str] | None = None,
 ) -> None:
-    """In-place: parse the JSON tag_stats column once per row, then aggregate per user."""
+    """In-place: read the native `tags` list column once per row, then aggregate per user."""
     if not rows:
         return
     if not (additional_tags or tag_mode != "none" or length_tags):

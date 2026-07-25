@@ -1,7 +1,6 @@
 """Correctness of the planet converter on synthetic .osh + changeset inputs (offline, no planet)."""
 
 import datetime as dt
-import json
 import pathlib
 
 import duckdb
@@ -112,7 +111,7 @@ def test_convert_attribution_tags_window(tmp_path):
         r[0]: r
         for r in con.execute(
             f"SELECT changeset_id, nodes_created, nodes_modified, nodes_deleted, ways_created, "
-            f"poi_created, tag_stats, lon FROM read_parquet('{out}/changefiles/**/*.parquet', hive_partitioning=true)"
+            f"poi_created, tags, lon FROM read_parquet('{out}/changefiles/**/*.parquet', hive_partitioning=true)"
         ).fetchall()
     }
     assert set(cf) == {100, 200, 300}
@@ -122,11 +121,13 @@ def test_convert_attribution_tags_window(tmp_path):
     assert cf[100][5] == 1
     assert abs(cf[100][7] - 13.1) < 1e-6
 
-    ts100 = json.loads(cf[100][6])
-    assert ts100["building"]["yes"] == {"c": 1, "m": 0}
-    assert ts100["highway"]["residential"] == {"c": 1, "m": 0}
-    assert json.loads(cf[200][6])["building"]["house"] == {"c": 0, "m": 1}
-    assert cf[300][6] is None
+    def tagset(tags):
+        return {(t["k"], t["v"], t["c"], t["m"]) for t in (tags or [])}
+
+    # tags is the native LIST<STRUCT(k,v,c,m,len_m)>, not JSON.
+    assert tagset(cf[100][6]) == {("building", "yes", 1, 0), ("highway", "residential", 1, 0)}
+    assert tagset(cf[200][6]) == {("building", "house", 0, 1)}
+    assert tagset(cf[300][6]) == set()
 
     changesets = {
         r[0]: r

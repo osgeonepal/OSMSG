@@ -72,6 +72,41 @@ def convert_cmd(
     info(f"datasets written to {out}/changefiles and {out}/changesets")
 
 
+@maintain_app.command("migrate-tags")
+def migrate_tags_cmd(
+    repo: Annotated[str, typer.Option("--repo", help="HuggingFace dataset repo id to migrate in place.")],
+    work_dir: Annotated[Path, typer.Option("--work-dir", help="Scratch dir for converted partitions.")] = Path(
+        "migrate_work"
+    ),
+    memory_limit: Annotated[
+        str, typer.Option("--memory-limit", help="DuckDB memory cap per partition (e.g. 12GB).")
+    ] = "12GB",
+) -> None:
+    """Rewrite the published changefiles partitions from JSON tag_stats to the native tags column
+    (one-time, idempotent). Needs a HuggingFace login and uv/uvx for the upload."""
+    from .migrate import migrate_changefiles_tags
+
+    migrated, skipped = migrate_changefiles_tags(repo, work_dir, memory_limit=memory_limit)
+    info(f"migrate-tags: {migrated} migrated, {skipped} already native")
+
+
+@maintain_app.command("prune-pg")
+def prune_pg_cmd(
+    psql_dsn: Annotated[str, typer.Option("--psql-dsn", help="Postgres DSN of the deployment to prune.")],
+    history_url: Annotated[
+        str, typer.Option("--history-url", help="Published dataset base (hf://datasets/... or URL).")
+    ] = "hf://datasets/kshitijrajsharma/osmsg-history",
+    overlap_days: Annotated[
+        int, typer.Option("--overlap-days", help="Keep this many days beyond the frontier before deleting.")
+    ] = 2,
+) -> None:
+    """Delete Postgres rows now covered by published history (created_at < frontier - overlap), keeping
+    Postgres to the uncovered live tail. Safe to run on any cadence; a no-op until the frontier advances."""
+    from ..prune import prune_covered
+
+    prune_covered(psql_dsn, history_url, overlap=dt.timedelta(days=overlap_days))
+
+
 @maintain_app.command("publish")
 def publish_cmd(
     out_dir: Annotated[Path, typer.Argument(help="Directory holding changefiles/ and changesets/.")],

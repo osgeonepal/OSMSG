@@ -47,6 +47,23 @@ def test_pg_schema_state_is_single_row_per_source():
     assert "BIGSERIAL" not in PG_SCHEMA  # no synthetic ids needed
 
 
+def test_superseded_changefile_sources_prunes_only_coarser_handoff_residue():
+    """A day->minute handoff leaves the coarse day row in PG; the finer minute source the store now
+    tracks supersedes it (disjoint by the boundary), so it is pruned. Unrelated sources are kept."""
+    from osmsg.export.psql import _superseded_changefile_sources
+
+    base = "https://planet.openstreetmap.org/replication"
+    day, hour, minute = f"{base}/day", f"{base}/hour", f"{base}/minute"
+
+    assert _superseded_changefile_sources({minute}, {day, hour, minute}) == {day, hour}
+    assert _superseded_changefile_sources({hour}, {day, hour}) == {day}
+    # No finer local source: nothing is superseded (no handoff happened).
+    assert _superseded_changefile_sources({day}, {day, minute}) == set()
+    # A non-changefile source (geofabrik country) is never treated as handoff residue.
+    geofabrik = "https://download.geofabrik.de/asia/nepal-updates"
+    assert _superseded_changefile_sources({minute}, {geofabrik, day}) == {day}
+
+
 def test_pg_schema_statements_each_parse_with_postgres_extension():
     """Each individual CREATE statement is well-formed enough that the postgres
     extension's parser would accept it, we use DuckDB's own parser as an
@@ -157,10 +174,44 @@ def test_user_stats_roundtrip_through_postgres(fresh_db, populated_db_factory):
     _assert_user_stats_match(actual, EXPECTED_USER_STATS)
 
 
+def test_merge_parquet_changeset_stats_native_tags(fresh_db, tmp_path):
+    """Shards store `tags` as a native LIST<STRUCT>, so ingest is a direct copy (no JSON parse). Every
+    row must land with its tags, including rows with no tags (empty list). Regression guard for the fix
+    that dropped the JSON round-trip + nested json_each which OOMed on a large tag blob."""
+    from osmsg.db.ingest import flush_rows_to_parquet, merge_parquet_files
+
+    n = 10
+    stats = [
+        (
+            1_000 + i, 5000, 99,
+            i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            [{"k": "building", "v": "yes", "c": i, "m": 0, "len_m": None}] if i % 2 == 0 else [],
+        )
+        for i in range(n)
+    ]
+    flush_rows_to_parquet(
+        parquet_dir=tmp_path / "setbased",
+        pid=1,
+        batch_index=0,
+        users=[(99, "lexoa")],
+        changesets=[(1_000 + i, 99, None, None, None, None, None, None, None) for i in range(n)],
+        changeset_stats=stats,
+    )
+    merge_parquet_files(fresh_db, tmp_path / "setbased", cleanup=True)
+
+    count, total_nodes = fresh_db.execute(
+        "SELECT COUNT(*), SUM(nodes_created) FROM changeset_stats WHERE changeset_id >= 1000 AND changeset_id < 1010"
+    ).fetchone()
+    assert count == n  # every row landed
+    assert total_nodes == sum(range(n))
+    tagged = fresh_db.execute("SELECT tags[1].c FROM changeset_stats WHERE changeset_id = 1006").fetchone()
+    assert tagged == (6,)  # json->struct conversion correct
+    untagged = fresh_db.execute("SELECT tags FROM changeset_stats WHERE changeset_id = 1007").fetchone()
+    assert untagged == ([],)  # NULL tag_stats -> empty native list
+
+
 def test_merge_parquet_upgrades_empty_changeset_when_richer_data_arrives(fresh_db, tmp_path):
     """Empty stub from tick 1 must be upgraded to richer data when tick 2 arrives."""
-    import json as _json
-
     from osmsg.db.ingest import flush_rows_to_parquet, merge_parquet_files
 
     flush_rows_to_parquet(
@@ -200,7 +251,7 @@ def test_merge_parquet_upgrades_empty_changeset_when_richer_data_arrives(fresh_d
                 0,
                 5,
                 0,
-                _json.dumps({"building": {"yes": {"c": 3, "m": 0}}}),
+                [{"k": "building", "v": "yes", "c": 3, "m": 0, "len_m": None}],
             )
         ],
     )
@@ -286,8 +337,6 @@ def test_merge_parquet_replaces_partial_geom_when_richer_arrives(fresh_db, tmp_p
 @pytest.mark.skipif(not os.environ.get("OSMSG_PG_DSN"), reason="OSMSG_PG_DSN not set; live PG push not exercised")
 def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
     """Same empty-then-rich scenario across two to_psql() calls into PG."""
-    import json as _json
-
     from osmsg.db.ingest import flush_rows_to_parquet, merge_parquet_files
 
     dsn = os.environ["OSMSG_PG_DSN"]
@@ -324,7 +373,7 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
         users=[(77, "carol")],
         changesets=[(900900, 77, None, ["#x"], "JOSM", 10.0, 20.0, 11.0, 21.0)],
         changeset_stats=[
-            (900900, 6000, 77, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, _json.dumps({"shop": {"bakery": {"c": 1, "m": 0}}})),
+            (900900, 6000, 77, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, [{"k": "shop", "v": "bakery", "c": 1, "m": 0, "len_m": None}]),  # noqa: E501
         ],
     )
     merge_parquet_files(fresh_db, tmp_path / "r2", cleanup=True)

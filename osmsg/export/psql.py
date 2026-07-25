@@ -114,6 +114,27 @@ def _push_chunked(conn: duckdb.DuckDBPyConnection, source: str, push) -> None:
         cursor += step
 
 
+_CHANGEFILE_RANK = {"/day": 1, "/hour": 2, "/minute": 3}
+
+
+def _changefile_rank(source_url: str) -> int:
+    """Coarse->fine rank of a planet changefile replication source (day<hour<minute); 0 if the URL is
+    not a changefile granularity (e.g. the changesets stream or a geofabrik country source)."""
+    for suffix, rank in _CHANGEFILE_RANK.items():
+        if source_url.endswith(suffix):
+            return rank
+    return 0
+
+
+def _superseded_changefile_sources(local_sources: set[str], existing_sources: set[str]) -> set[str]:
+    """PG changefile sources coarser than the finest changefile source the local store now tracks. These
+    are the residue of a clean day->hour->minute handoff (disjoint coverage), safe to retire in PG."""
+    local_finest = max((_changefile_rank(u) for u in local_sources), default=0)
+    if not local_finest:
+        return set()
+    return {u for u in existing_sources if 0 < _changefile_rank(u) < local_finest}
+
+
 def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = False) -> None:
     """Push every osmsg table to the libpq DSN target. bulk_load is for the one-time full-history
     import (drops indexes and foreign keys, streams, rebuilds, commits per range); leave it off for
@@ -141,6 +162,17 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
         # Refuse cross-source push: would double-count via the (seq_id, changeset_id) PK.
         local_sources = {r[0] for r in conn.execute("SELECT source_url FROM state").fetchall()}
         existing_sources = {r[0] for r in conn.execute("SELECT source_url FROM pg_target.state").fetchall()}
+        # A granularity handoff (day->hour->minute) retires the coarse changefile source in the local store
+        # but leaves its now-stale resume row in PG. Those sources are superseded by the finer one the store
+        # now tracks and their data is time-disjoint by the handoff boundary, so prune the residual rows
+        # rather than tripping the mixing guard on them. Only the resume row is dropped; the data stays.
+        superseded = _superseded_changefile_sources(local_sources, existing_sources)
+        for stale in superseded:
+            conn.execute("DELETE FROM pg_target.state WHERE source_url = ?", [stale])
+        existing_sources -= superseded
+        # Every push below is ON CONFLICT DO NOTHING (set semantics), so input order is irrelevant; stream
+        # rather than buffer to keep a large incremental push within the memory_limit.
+        conn.execute("SET preserve_insertion_order = false")
         cross_source = existing_sources - local_sources
         if cross_source and local_sources:
             raise OsmsgError(
@@ -151,7 +183,6 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
             )
 
         if bulk_load:
-            conn.execute("SET preserve_insertion_order = false")
             for table, name, _add in _BULK_FKS:
                 _pg(conn, f"ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {name}")
             for name, _create in _BULK_INDEXES:

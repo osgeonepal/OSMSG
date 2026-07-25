@@ -80,25 +80,38 @@ def test_country_only_resolves_state_under_geofabrik_url(tmp_path, monkeypatch, 
     assert "--update" in captured_cmd["cmd"]
 
 
-def test_no_state_appends_bootstrap_window(tmp_path, monkeypatch, captured_cmd, clean_env):
-    """First tick (no state row) → --last <bootstrap> instead of --update."""
-    name = "nepal"
-    monkeypatch.setenv("OSMSG_EXTRA_ARGS", f"--name {name} --output-dir {tmp_path} --url minute")
-    monkeypatch.setenv("OSMSG_BOOTSTRAP", "hour")
+def test_cold_start_bootstraps_at_day(tmp_path, monkeypatch, captured_cmd, clean_env):
+    """First tick (no state row) cold-starts at day granularity, not --update; --update then refines."""
+    name = "stats"
+    monkeypatch.setenv("OSMSG_EXTRA_ARGS", f"--name {name} --output-dir {tmp_path}")
 
     assert _tick.main() == 0
     cmd = captured_cmd["cmd"]
     assert "--update" not in cmd
-    assert cmd[-2:] == ["--last", "hour"]
+    assert "--url" in cmd and cmd[cmd.index("--url") + 1] == "day"
+    assert cmd[-2:] == ["--days", "1"]  # default cold-start window
 
 
-def test_bootstrap_days_overrides_bootstrap_preset(tmp_path, monkeypatch, captured_cmd, clean_env):
-    name = "nepal"
+def test_planet_continues_seeded_source(tmp_path, monkeypatch, captured_cmd, clean_env):
+    """A `--insert --seed-only` seeds the store's resume source; the planet tick must --update off that
+    seed, not re-bootstrap."""
+    name = "stats"
+    _seed_state(tmp_path, name, SHORTCUTS["day"])
+    monkeypatch.setenv("OSMSG_EXTRA_ARGS", f"--name {name} --output-dir {tmp_path}")
+
+    assert _tick.main() == 0
+    assert "--update" in captured_cmd["cmd"]
+    assert "--days" not in captured_cmd["cmd"]
+
+
+def test_bootstrap_days_sets_cold_start_window(tmp_path, monkeypatch, captured_cmd, clean_env):
+    name = "stats"
     monkeypatch.setenv("OSMSG_EXTRA_ARGS", f"--name {name} --output-dir {tmp_path}")
     monkeypatch.setenv("OSMSG_BOOTSTRAP_DAYS", "3")
 
     assert _tick.main() == 0
     cmd = captured_cmd["cmd"]
+    assert "--url" in cmd and cmd[cmd.index("--url") + 1] == "day"
     assert cmd[-2:] == ["--days", "3"]
 
 
@@ -122,17 +135,16 @@ def test_tick_lifecycle_cold_then_warm(tmp_path, monkeypatch, clean_env):
         "OSMSG_EXTRA_ARGS",
         f"--name {name} --output-dir {tmp_path} --country nepal --url minute",
     )
-    monkeypatch.setenv("OSMSG_BOOTSTRAP", "hour")
 
     assert _tick.main() == 0
-    assert calls[0][-2:] == ["--last", "hour"]
+    assert calls[0][-2:] == ["--days", "1"]  # cold start (explicit --url, so no day override forced)
     assert "--update" not in calls[0]
 
     _seed_state(tmp_path, name, SHORTCUTS["minute"])
 
     assert _tick.main() == 0
     assert "--update" in calls[1]
-    assert "--last" not in calls[1]
+    assert "--days" not in calls[1]
 
 
 def test_tick_skips_when_previous_tick_holds_lock(tmp_path, monkeypatch, clean_env):

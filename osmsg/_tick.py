@@ -22,6 +22,20 @@ def _has_state(db_path: Path, source_url: str) -> bool:
     return result
 
 
+def _has_any_state(db_path: Path) -> bool:
+    """True if the store has a resume position for ANY source. A `--insert --seed-only` seeds the source
+    at the granularity matched to the gap (e.g. day), which differs from this tick's default source
+    (minute); `--update` reads the store's own tracked source and continues/auto-refines it, so any
+    seeded state means we continue rather than bootstrap to now."""
+    if not db_path.exists():
+        return False
+    conn = connect(str(db_path))
+    create_tables(conn)
+    row = conn.execute("SELECT count(*) FROM state").fetchone()
+    conn.close()
+    return bool(row and row[0])
+
+
 def _parse_arg(args: list[str], flag: str) -> str | None:
     for i, arg in enumerate(args):
         if arg == flag and i + 1 < len(args):
@@ -31,13 +45,12 @@ def _parse_arg(args: list[str], flag: str) -> str | None:
 
 def main() -> int:
     extra_args = shlex.split(os.environ.get("OSMSG_EXTRA_ARGS", ""))
-    bootstrap = os.environ.get("OSMSG_BOOTSTRAP", "hour")
-    bootstrap_days = os.environ.get("OSMSG_BOOTSTRAP_DAYS")
+    bootstrap_days = os.environ.get("OSMSG_BOOTSTRAP_DAYS", "1")
     name = _parse_arg(extra_args, "--name") or "stats"
     out = Path(_parse_arg(extra_args, "--output-dir") or "/var/lib/osmsg")
     country = _parse_arg(extra_args, "--country")
     explicit_url = _parse_arg(extra_args, "--url")
-    url = explicit_url or "minute"
+    url = explicit_url or "day"
 
     out.mkdir(parents=True, exist_ok=True)
 
@@ -61,12 +74,17 @@ def main() -> int:
         if not (extra_set & {"--all", "--keys"}):
             cmd.append("--all")
 
-        if _has_state(db_path, source_url):
+        # A country run tracks one specific geofabrik source; the planet run continues whatever the store
+        # was seeded with (possibly a coarser source than this tick's default), so accept any state.
+        has_state = _has_state(db_path, source_url) if country else _has_any_state(db_path)
+        if has_state:
             cmd.append("--update")
-        elif bootstrap_days:
-            cmd.extend(["--days", bootstrap_days])
         else:
-            cmd.extend(["--last", bootstrap])
+            # Cold start at day granularity (coarse, few files); --update then refines day->hour->minute
+            # as the backlog shrinks. A normal deployment seeds the same way via `--insert`.
+            if explicit_url is None and not country:
+                cmd.extend(["--url", "day"])
+            cmd.extend(["--days", bootstrap_days])
 
         print(f"[osmsg-tick] {' '.join(cmd)}", flush=True)
         return subprocess.call(cmd)

@@ -1,0 +1,9 @@
+[Unit]
+Description=Monthly osmsg Postgres prune (day after the maintain publish)
+
+[Timer]
+OnCalendar=*-*-05 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

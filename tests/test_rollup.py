@@ -1,17 +1,27 @@
 """maintain.rollup builds the user and hashtag_changeset rollups from a month's raw partitions,
 and the derived all-time rollup is the exact sum of the month rollups."""
 
-import json
-
 import duckdb
 
 from osmsg.maintain.rollup import _COUNT_COLS, build_month_rollups
 
-_CF_COLS = ["changeset_id", "uid", *_COUNT_COLS, "tag_stats"]
+_TAGS_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]"
+_CF_COLS = ["changeset_id", "uid", *_COUNT_COLS, "tags"]
+
+
+def _to_tags(nested):
+    """Flatten a {key:{value:{c,m[,len]}}} test dict into the native LIST<STRUCT> the datasets now store."""
+    if not nested:
+        return []
+    return [
+        {"k": k, "v": v, "c": vv.get("c", 0), "m": vv.get("m", 0), "len_m": vv.get("len")}
+        for k, by_value in nested.items()
+        for v, vv in by_value.items()
+    ]
 
 
 def _write_month(out, year, month, changefiles, changesets):
-    """changefiles rows: (changeset_id, uid, {count_col: n}, tag_stats_dict|None).
+    """changefiles rows: (changeset_id, uid, {count_col: n}, tag_dict|None).
     changesets rows: (changeset_id, uid, username, [hashtags]|None)."""
     con = duckdb.connect()
     cf_dir = out / "changefiles" / f"year={year}" / f"month={month}"
@@ -20,7 +30,7 @@ def _write_month(out, year, month, changefiles, changesets):
     cs_dir.mkdir(parents=True)
 
     con.execute(
-        f"CREATE TABLE cf ({', '.join(c + ' BIGINT' for c in _CF_COLS[:-1])}, tag_stats VARCHAR, created_at TIMESTAMP)"
+        f"CREATE TABLE cf ({', '.join(c + ' BIGINT' for c in _CF_COLS[:-1])}, tags {_TAGS_DDL}, created_at TIMESTAMP)"
     )
     con.executemany(
         f"INSERT INTO cf VALUES ({', '.join(['?'] * (len(_CF_COLS) + 1))})",
@@ -29,7 +39,7 @@ def _write_month(out, year, month, changefiles, changesets):
                 cid,
                 uid,
                 *[counts.get(c, 0) for c in _COUNT_COLS],
-                json.dumps(tags) if tags is not None else None,
+                _to_tags(tags),
                 f"{year}-{month:02d}-15",
             )
             for cid, uid, counts, tags in changefiles

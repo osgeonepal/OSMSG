@@ -1,0 +1,12 @@
+[Unit]
+Description=osmsg Postgres prune (drop rows now covered by published history)
+Requires=docker.service
+After=docker.service network-online.target osmsg.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/osmsg/infra
+EnvironmentFile=/opt/osmsg/infra/.env
+ExecStart=/opt/osmsg/infra/run-prune.sh
+TimeoutStartSec=1800

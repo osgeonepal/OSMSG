@@ -90,6 +90,19 @@ sudo systemctl daemon-reload && sudo systemctl enable --now osmsg-maintain.timer
 `sudo systemctl start osmsg-maintain.service` (previous month) or pass a month:
 `sudo -E .../run-maintain.sh 2026-06`.
 
+Postgres prune (drops rows now covered by published history, keeping Postgres to the live tail). Runs
+the osmsg CLI inside the compose network so it can reach the db service; a no-op until the frontier
+advances after a maintain publish, so it is scheduled the day after (the 5th):
+
+```bash
+sudo cp infra/run-prune.sh /opt/osmsg/infra/ && sudo chmod +x /opt/osmsg/infra/run-prune.sh
+sudo cp infra/osmsg-prune.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now osmsg-prune.timer
+```
+
+Run it by hand with `sudo systemctl start osmsg-prune.service`. It keeps `--overlap-days` (default 2)
+beyond the frontier as a buffer for a month that stops slightly short of its boundary.
+
 ## Operate
 
 ```bash

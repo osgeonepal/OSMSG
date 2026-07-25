@@ -163,7 +163,6 @@ def ingest_remote(
     end_iso = split.remote_end.astimezone(UTC).isoformat()
     in_window = f"created_at >= TIMESTAMPTZ '{start_iso}' AND created_at < TIMESTAMPTZ '{end_iso}'"
 
-    conn.execute("INSTALL json; LOAD json;")
     conn.execute("INSTALL spatial; LOAD spatial;")
     if history_url.startswith(("hf://", "http://", "https://", "s3://")):
         conn.execute("INSTALL httpfs; LOAD httpfs;")
@@ -208,31 +207,16 @@ def ingest_remote(
                     ON CONFLICT (changeset_id) DO NOTHING"""
             )
         if changefiles_src is not None:
-            # changefiles publishes tag_stats as JSON; materialize the store's native `tags`. Set-based
-            # (one json_each pass + group), not the per-row correlated tag_list_expr, so a bulk history
-            # ingest stays fast; a month partition bounds the exploded intermediate's memory.
+            # changefiles stores `tags` natively (LIST<STRUCT>), so ingest is a direct copy.
             conn.execute(
                 f"""INSERT INTO changeset_stats
-                    WITH src AS (SELECT * FROM {changefiles_src} WHERE {stats_where}),
-                    tg AS (
-                        SELECT changeset_id,
-                               list(struct_pack(k := k, v := v, c := c, m := m, len_m := len_m)) AS tags
-                        FROM (
-                            SELECT changeset_id, tk.key AS k, tv.key AS v,
-                                   COALESCE((tv.value ->> 'c')::bigint, 0) AS c,
-                                   COALESCE((tv.value ->> 'm')::bigint, 0) AS m,
-                                   (tv.value ->> 'len')::double AS len_m
-                            FROM src, json_each(tag_stats) AS tk, json_each(tk.value) AS tv
-                            WHERE tag_stats IS NOT NULL
-                        ) GROUP BY changeset_id
-                    )
-                    SELECT src.changeset_id, {HISTORY_SEQ_ID} AS seq_id, src.uid,
-                           src.nodes_created, src.nodes_modified, src.nodes_deleted,
-                           src.ways_created, src.ways_modified, src.ways_deleted,
-                           src.rels_created, src.rels_modified, src.rels_deleted,
-                           src.poi_created, src.poi_modified,
-                           COALESCE(tg.tags, []::{TAG_STRUCT_DDL}[]) AS tags
-                    FROM src LEFT JOIN tg USING (changeset_id)
+                    SELECT changeset_id, {HISTORY_SEQ_ID} AS seq_id, uid,
+                           nodes_created, nodes_modified, nodes_deleted,
+                           ways_created, ways_modified, ways_deleted,
+                           rels_created, rels_modified, rels_deleted,
+                           poi_created, poi_modified,
+                           COALESCE(tags, []::{TAG_STRUCT_DDL}[]) AS tags
+                    FROM {changefiles_src} WHERE {stats_where}
                     ON CONFLICT (seq_id, changeset_id) DO NOTHING"""
             )
 

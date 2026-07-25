@@ -112,6 +112,71 @@ def hashtag_scope(
     return sql, params
 
 
+def history_dedup_scope(
+    history_rel: str,
+    *,
+    prefixes: list[tuple[str, str]],
+    frontier: dt.datetime,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+) -> tuple[str, list[object]]:
+    """The deduped per-changeset HISTORY relation alone (created_at < frontier), as its own SELECT so a
+    caller can aggregate it and the recent side SEPARATELY and combine the small results. This avoids
+    DISTINCT ON over the history+recent UNION, which forces DuckDB to materialize the whole 14M-row
+    intermediate for a big hashtag; aggregating each side first keeps the history dedup streaming.
+    `prefixes` must be non-empty. Returns (sql, params)."""
+    if not prefixes:
+        raise ValueError("prefixes must be non-empty")
+    window_sql, window_params = _window_clause(start, end)
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    sql = (
+        f"SELECT DISTINCT ON (changeset_id) {_PROJECTION} FROM {history_rel} "
+        f"WHERE ({hist_pred}) AND created_at < ?{window_sql}"
+    )
+    return sql, [*prefix_params, frontier, *window_params]
+
+
+def history_scope_count(
+    history_rel: str,
+    *,
+    prefixes: list[tuple[str, str]],
+    frontier: dt.datetime,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+) -> tuple[str, list[object]]:
+    """A CHEAP raw `count(*)` of history rows matching the hashtag scope + window (no dedup, hashtag range
+    prunes row groups: ~sub-second even for a 14M-changeset hashtag). Used to decide whether a per-user
+    tag breakdown is affordable before paying for it. Returns (sql, params)."""
+    if not prefixes:
+        raise ValueError("prefixes must be non-empty")
+    window_sql, window_params = _window_clause(start, end)
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    sql = f"SELECT count(*) FROM {history_rel} WHERE ({hist_pred}) AND created_at < ?{window_sql}"
+    return sql, [*prefix_params, frontier, *window_params]
+
+
+def recent_scope(
+    recent_stats_rel: str,
+    recent_changesets_rel: str,
+    *,
+    prefixes: list[tuple[str, str]],
+    frontier: dt.datetime,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+) -> tuple[str, list[object]]:
+    """The recent per-changeset relation alone (created_at >= frontier), already one row per changeset.
+    Companion to `history_dedup_scope` for the aggregate-then-combine path. Returns (sql, params)."""
+    if not prefixes:
+        raise ValueError("prefixes must be non-empty")
+    window_sql, window_params = _window_clause(start, end)
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    recent_pred = " OR ".join("(lower(h) >= ? AND lower(h) < ?)" for _ in prefixes)
+    sql = "(" + _recent_from_base(recent_stats_rel, recent_changesets_rel, window_sql, recent_pred) + ")"
+    return sql, [frontier, *window_params, *prefix_params]
+
+
 def map_scope(
     history_rollup_rel: str,
     recent_changesets_rel: str,

@@ -92,12 +92,26 @@ async def summary(hashtag: str | list[str], *, start: dt.datetime | None = None,
 async def leaderboard(
     hashtag: str | list[str],
     *,
-    limit: int = 100,
-    offset: int = 0,
+    page: int = 1,
+    page_size: int = query.DEFAULT_PAGE_SIZE,
+    sort: str = "map_changes",
+    order: str = "desc",
+    q: str | None = None,
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ):
-    return await asyncio.to_thread(_run, query.leaderboard, hashtag, limit=limit, offset=offset, start=start, end=end)
+    return await asyncio.to_thread(
+        _run,
+        query.leaderboard,
+        hashtag,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        order=order,
+        q=q,
+        start=start,
+        end=end,
+    )
 
 
 async def tags(
@@ -108,6 +122,12 @@ async def tags(
 
 async def editors(hashtag: str | list[str], *, start: dt.datetime | None = None, end: dt.datetime | None = None):
     return await asyncio.to_thread(_run, query.editors, hashtag, start=start, end=end)
+
+
+async def hashtags(
+    hashtag: str | list[str], *, limit: int = 15, start: dt.datetime | None = None, end: dt.datetime | None = None
+):
+    return await asyncio.to_thread(_run, query.hashtags, hashtag, limit=limit, start=start, end=end)
 
 
 async def trends(

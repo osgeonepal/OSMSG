@@ -7,7 +7,6 @@ The DB schema is therefore portable across DuckDB, Parquet, and PostgreSQL.
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -93,7 +92,7 @@ class ElementStat(BaseModel):
 
 
 class ChangesetStats(BaseModel):
-    """Per-changeset accumulator. Flattens to a 14-column DB row + JSON tag_stats."""
+    """Per-changeset accumulator. Flattens to a row of count columns plus a native `tags` list."""
 
     changeset_id: int
     uid: int
@@ -112,16 +111,15 @@ class ChangesetStats(BaseModel):
     def map_changes(self) -> int:
         return self.nodes.total + self.ways.total + self.rels.total
 
-    def tag_stats_plain(self) -> dict[str, dict[str, dict[str, Any]]]:
-        out: dict[str, dict[str, dict[str, Any]]] = {}
-        for key, by_value in self.tag_stats.items():
-            out[key] = {}
-            for value, tv in by_value.items():
-                entry: dict[str, Any] = {"c": tv.c, "m": tv.m}
-                if tv.len is not None:
-                    entry["len"] = round(tv.len, 2)
-                out[key][value] = entry
-        return out
+    def tags_list(self) -> list[dict[str, Any]]:
+        """Flat native tag rows for the shard's LIST<STRUCT(k,v,c,m,len_m)> column. The handler already
+        holds the breakdown natively, so the shard stores it as a native list (read straight into the
+        store) instead of a JSON string that the ingest would have to re-parse."""
+        return [
+            {"k": key, "v": value, "c": tv.c, "m": tv.m, "len_m": round(tv.len, 2) if tv.len is not None else None}
+            for key, by_value in self.tag_stats.items()
+            for value, tv in by_value.items()
+        ]
 
     def to_row(self) -> tuple:
         return (
@@ -139,5 +137,5 @@ class ChangesetStats(BaseModel):
             self.rels.d,
             self.poi_created,
             self.poi_modified,
-            json.dumps(self.tag_stats_plain()) if self.tag_stats else None,
+            self.tags_list(),
         )

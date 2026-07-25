@@ -10,7 +10,19 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ..stats import tag_list_expr
+# Native shard column for the per-changeset tag breakdown, matching the store's
+# STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[] so ingest is a direct copy.
+_TAG_PA_TYPE = pa.list_(
+    pa.struct(
+        [
+            pa.field("k", pa.string()),
+            pa.field("v", pa.string()),
+            pa.field("c", pa.int64()),
+            pa.field("m", pa.int64()),
+            pa.field("len_m", pa.float64()),
+        ]
+    )
+)
 
 
 def _quarantine_corrupt(parquet_dir: Path) -> None:
@@ -61,7 +73,7 @@ CHANGESET_STATS_SCHEMA = pa.schema(
         pa.field("rels_deleted", pa.int32()),
         pa.field("poi_created", pa.int32()),
         pa.field("poi_modified", pa.int32()),
-        pa.field("tag_stats", pa.string()),
+        pa.field("tags", _TAG_PA_TYPE),
     ]
 )
 
@@ -111,7 +123,12 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
         # read_parquet() takes a literal, escape so quoted paths can't break out.
         return _sql_escape((parquet_dir / f"temp_*_{name}_*.parquet").as_posix())
 
-    conn.execute("BEGIN")
+    # Each step auto-commits (no enclosing transaction): DuckDB keeps an uncommitted transaction's changes
+    # and the non-spillable PK index in memory until COMMIT, so wrapping a whole multi-day window in one
+    # transaction exhausts a constrained memory_limit. Every statement here is idempotent (INSERT OR IGNORE,
+    # COALESCE update), so committing per step - and re-merging leftover shards after a crash - is safe.
+    # preserve_insertion_order=false lets the merges stream instead of buffering rows to preserve order.
+    conn.execute("SET preserve_insertion_order = false")
     try:
         if any(parquet_dir.glob("temp_*_users_*.parquet")):
             conn.execute(f"INSERT OR IGNORE INTO users SELECT uid, username FROM read_parquet('{pattern('users')}')")
@@ -155,9 +172,8 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
                 """
             )
         if any(parquet_dir.glob("temp_*_changeset_stats_*.parquet")):
-            # The shard keeps tag_stats as the compact JSON wire form; materialize the native `tags`.
-            conn.execute("INSTALL json")
-            conn.execute("LOAD json")
+            # The shard stores `tags` as a native LIST<STRUCT> (built in the handler), so ingest is a
+            # direct column copy.
             conn.execute(
                 f"""
                 INSERT OR IGNORE INTO changeset_stats
@@ -166,14 +182,12 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
                        ways_created,  ways_modified,  ways_deleted,
                        rels_created,  rels_modified,  rels_deleted,
                        poi_created,   poi_modified,
-                       {tag_list_expr("tag_stats")} AS tags
+                       tags
                 FROM read_parquet('{pattern("changeset_stats")}')
                 """
             )
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+    finally:
+        conn.execute("SET preserve_insertion_order = true")
 
     if cleanup:
         shutil.rmtree(parquet_dir, ignore_errors=True)

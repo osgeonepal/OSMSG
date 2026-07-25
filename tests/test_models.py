@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 
 from osmsg.models import Action, Changeset, ChangesetStats, ElementStat, TagValueStat, User
 
@@ -48,7 +47,7 @@ def test_changeset_stats_map_changes_sums_all_buckets():
     assert s.map_changes == 12
 
 
-def test_changeset_stats_to_row_flattens_buckets_and_serialises_tags():
+def test_changeset_stats_to_row_flattens_buckets_and_emits_native_tags():
     s = ChangesetStats(changeset_id=42, uid=7, seq_id=99)
     s.nodes.c = 5
     s.ways.m = 2
@@ -64,16 +63,16 @@ def test_changeset_stats_to_row_flattens_buckets_and_serialises_tags():
     assert row[7] == 2  # ways_modified
     assert row[12] == 3  # poi_created
 
-    payload = json.loads(row[14])
-    assert payload == {
-        "building": {"yes": {"c": 2, "m": 1}},
-        "highway": {"residential": {"c": 1, "m": 0, "len": 120.0}},
-    }
+    # The shard column is a native list of {k, v, c, m, len_m} rows, not a JSON string.
+    assert row[14] == [
+        {"k": "building", "v": "yes", "c": 2, "m": 1, "len_m": None},
+        {"k": "highway", "v": "residential", "c": 1, "m": 0, "len_m": 120.0},
+    ]
 
 
-def test_changeset_stats_to_row_emits_null_tag_stats_when_empty():
+def test_changeset_stats_to_row_emits_empty_tags_when_none():
     s = ChangesetStats(changeset_id=1, uid=1, seq_id=1)
-    assert s.to_row()[14] is None
+    assert s.to_row()[14] == []
 
 
 def test_user_to_row_pair():

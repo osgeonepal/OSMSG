@@ -18,7 +18,7 @@ Under `hf://datasets/kshitijrajsharma/osmsg-history`:
 
 | Path | Grain | Serves |
 | --- | --- | --- |
-| `changefiles` | per-changeset counts + `tag_stats` + `created_at` + centroid | the source of truth for counts |
+| `changefiles` | per-changeset counts + native `tags` + `created_at` + centroid | the source of truth for counts |
 | `changesets` | per-changeset uid/username/editor/hashtags + centroid | the source of truth for metadata |
 | `rollup/hashtag_changeset` | one row per (hashtag, changeset), full breakdown + native `tags` | any hashtag query, exact |
 | `rollup/alltime_user` | one row per uid | the all-time leaderboard with no hashtag |
@@ -49,10 +49,9 @@ runs on DuckDB and on Postgres, so the same query returns the same numbers on ei
 Tags are stored one way in every queried store: a native list of `(key, value, creates, modifies,
 length_m)`. In DuckDB (the store and the rollup) that is a `LIST<STRUCT>`; in Postgres it is an array
 of the composite type `osmsg_tag`. A tag breakdown reads that column directly, the same code on either
-engine, with no per-query JSON parsing. JSON survives only as the archival wire form of the published
-`changefiles` dataset and is converted to the native list on read (`osmsg.stats.tag_list_expr`). An
-existing Postgres deployment moves to the native column once with `docs/migrate_pg_native_tags.sql`; a
-fresh deployment creates it on first start.
+engine, with no per-query JSON parsing. The published `changefiles` dataset stores the same native
+list, so history reads it with a direct column copy. An existing Postgres deployment moves to the
+native column once with `docs/migrate_pg_native_tags.sql`; a fresh deployment creates it on first start.
 
 `osmsg.catalog` combines two sources into one relation, split at the frontier: history comes from the
 `hashtag_changeset` rollup, and the recent tail (from the frontier on) is derived on the fly from the

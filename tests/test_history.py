@@ -107,11 +107,12 @@ _CHANGESETS = [
     (200, 2, "bob", "2024-01-15", "iD", [], (0.0, 0.0, 0.1, 0.1)),
     (300, 1, "alice", "2024-01-20", "JOSM", ["#missingmaps"], (13.1, 52.4, 13.3, 52.6)),
 ]
-# id, nodes_created, ways_created, tag_stats
+# id, nodes_created, ways_created, tags (native LIST<STRUCT> literal or None)
+_TAGS_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]"
 _CHANGEFILES = [
-    (100, 5, 1, '{"building":{"yes":{"c":1,"m":0}}}'),
+    (100, 5, 1, "[{'k':'building','v':'yes','c':1,'m':0,'len_m':NULL}]"),
     (200, 3, 0, None),
-    (300, 0, 2, '{"highway":{"residential":{"c":2,"m":0}}}'),
+    (300, 0, 2, "[{'k':'highway','v':'residential','c':2,'m':0,'len_m':NULL}]"),
 ]
 
 
@@ -134,18 +135,18 @@ def _build_dataset(root: Path):
     # full changeset_stats count set; only nodes_created/ways_created vary, rest are 0
     cf_vals = ",\n".join(
         f"({cid},{uid},{nc},0,0,{wc},0,0,0,0,0,0,0,"
-        f"{('NULL' if ts is None else chr(39) + ts + chr(39))},TIMESTAMPTZ '{cre}',0,0,0,0,0,0)"
+        f"{('NULL' if ts is None else ts)},TIMESTAMPTZ '{cre}',0,0,0,0,0,0)"
         for (cid, nc, wc, ts), (_, uid, _n, cre, _e, _h, _b) in zip(_CHANGEFILES, _CHANGESETS, strict=True)
     )
     cf_cols = (
         "changeset_id,uid,nodes_created,nodes_modified,nodes_deleted,ways_created,ways_modified,ways_deleted,"
-        "rels_created,rels_modified,rels_deleted,poi_created,poi_modified,tag_stats,created_at,"
+        "rels_created,rels_modified,rels_deleted,poi_created,poi_modified,tags,created_at,"
         "lon,lat,min_lon,min_lat,max_lon,max_lat"
     )
     cf_dir = root / "changefiles" / "year=2024" / "month=1"
     cf_dir.mkdir(parents=True)
     con.execute(
-        f"""COPY (SELECT * EXCLUDE (tag_stats), tag_stats::JSON tag_stats FROM (VALUES {cf_vals}) AS t({cf_cols}))
+        f"""COPY (SELECT * EXCLUDE (tags), tags::{_TAGS_DDL} tags FROM (VALUES {cf_vals}) AS t({cf_cols}))
             TO '{(cf_dir / "data.parquet").as_posix()}' (FORMAT parquet)"""
     )
     con.close()

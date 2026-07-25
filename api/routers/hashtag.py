@@ -11,6 +11,7 @@ from typing import Any
 from litestar import Controller, Router, get
 from litestar.exceptions import HTTPException
 
+from osmsg.query import LEADERBOARD_SORTS as _LEADERBOARD_SORTS
 from osmsg.query import TREND_INTERVALS as _TREND_INTERVALS
 
 from .. import duck
@@ -46,13 +47,27 @@ class HashtagController(Controller):
     async def get_leaderboard(
         self,
         hashtag: str,
-        limit: int = 100,
-        offset: int = 0,
+        page: int = 1,
+        page_size: int = 25,
+        sort: str = "map_changes",
+        order: str = "desc",
+        q: str | None = None,
         start: datetime | None = None,
         end: datetime | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
+        """One page of the leaderboard as `{items, page, page_size, total, total_pages}`. `sort` is one of
+        the element/name columns, `order` asc|desc, `q` an optional contributor-name search; all applied
+        server-side across the whole result, so paging, sorting, and searching are consistent."""
+        if sort not in _LEADERBOARD_SORTS:
+            raise HTTPException(status_code=400, detail=f"sort must be one of {', '.join(_LEADERBOARD_SORTS)}")
+        if order not in ("asc", "desc"):
+            raise HTTPException(status_code=400, detail="order must be 'asc' or 'desc'")
+        if page < 1:
+            raise HTTPException(status_code=400, detail="page must be >= 1")
         start, end = _window(start, end)
-        return await duck.leaderboard(_hashtags(hashtag), limit=limit, offset=offset, start=start, end=end)
+        return await duck.leaderboard(
+            _hashtags(hashtag), page=page, page_size=page_size, sort=sort, order=order, q=q, start=start, end=end
+        )
 
     @get("/tags")
     async def get_tags(
@@ -67,6 +82,14 @@ class HashtagController(Controller):
     ) -> list[dict[str, Any]]:
         start, end = _window(start, end)
         return await duck.editors(_hashtags(hashtag), start=start, end=end)
+
+    @get("/hashtags")
+    async def get_hashtags(
+        self, hashtag: str, limit: int = 15, start: datetime | None = None, end: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """Trending hashtags in the queried scope, ranked by distinct contributors: `[{hashtag, users}]`."""
+        start, end = _window(start, end)
+        return await duck.hashtags(_hashtags(hashtag), limit=limit, start=start, end=end)
 
     @get("/trends")
     async def get_trends(

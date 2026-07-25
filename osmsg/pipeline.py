@@ -449,7 +449,7 @@ def _finalize(
 
     # Per-user metadata/tag enrichment feeds only the file-format writers; a psql push writes the raw
     # tables and never reads these rows. Skip it when no file format is requested, so a psql-only run
-    # never materializes every row's tag_stats JSON at once (multi-GB on a large store).
+    # never materializes every row's tags at once (multi-GB on a large store).
     if _FILE_FORMATS & set(cfg.formats) or cfg.summary:
         if cfg.changeset or cfg.hashtags:
             attach_metadata(conn, rows)

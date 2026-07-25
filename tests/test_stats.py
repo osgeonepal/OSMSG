@@ -57,17 +57,17 @@ def test_map_changes_expr_is_nine_terms():
     assert "poi" not in map_changes_expr("cs")
 
 
-def test_tag_list_roundtrip(stats_conn):
-    # The native-list path: convert tag_stats JSON to LIST<STRUCT>, then break it down. Same numbers.
-    from osmsg.stats import tag_breakdown_from_list, tag_list_expr
+def test_tag_breakdown_from_native_list(stats_conn):
+    # tag_breakdown_from_list aggregates the native LIST<STRUCT(k,v,c,m,len_m)> tags column.
+    from osmsg.stats import TAG_STRUCT_DDL, tag_breakdown_from_list
 
-    stats_conn.execute("CREATE TABLE tj (changeset_id BIGINT, tag_stats JSON)")
+    stats_conn.execute(f"CREATE TABLE tl (changeset_id BIGINT, tags {TAG_STRUCT_DDL}[])")
     stats_conn.execute(
-        """INSERT INTO tj VALUES
-        (1, '{"building":{"yes":{"c":5,"m":2}}}'),
-        (2, '{"building":{"yes":{"c":3,"m":1}},"highway":{"residential":{"c":1,"m":0}}}')"""
+        """INSERT INTO tl VALUES
+        (1, [{'k':'building','v':'yes','c':5,'m':2,'len_m':NULL}]),
+        (2, [{'k':'building','v':'yes','c':3,'m':1,'len_m':NULL},
+             {'k':'highway','v':'residential','c':1,'m':0,'len_m':NULL}])"""
     )
-    stats_conn.execute(f"CREATE TABLE tl AS SELECT changeset_id, {tag_list_expr('tag_stats')} AS tags FROM tj")
     rows = {(r[0], r[1]): (r[2], r[3]) for r in stats_conn.execute(tag_breakdown_from_list("tl")).fetchall()}
     assert rows[("building", "yes")] == (8, 3)
     assert rows[("highway", "residential")] == (1, 0)
