@@ -50,8 +50,8 @@ Tags are stored one way in every queried store: a native list of `(key, value, c
 length_m)`. In DuckDB (the store and the rollup) that is a `LIST<STRUCT>`; in Postgres it is an array
 of the composite type `osmsg_tag`. A tag breakdown reads that column directly, the same code on either
 engine, with no per-query JSON parsing. The published `changefiles` dataset stores the same native
-list, so history reads it with a direct column copy. An existing Postgres deployment moves to the
-native column once with `docs/migrate_pg_native_tags.sql`; a fresh deployment creates it on first start.
+list, so history reads it with a direct column copy. A Postgres deployment creates the composite type
+and column on first start.
 
 `osmsg.catalog` combines two sources into one relation, split at the frontier: history comes from the
 `hashtag_changeset` rollup, and the recent tail (from the frontier on) is derived on the fly from the
