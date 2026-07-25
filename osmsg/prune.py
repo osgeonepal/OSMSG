@@ -25,9 +25,7 @@ def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
     conn.execute(f"ATTACH '{dsn.replace(chr(39), chr(39) * 2)}' AS pg (TYPE postgres)")
     iso = cutoff.astimezone(dt.UTC).isoformat()
     old_cs = f"SELECT changeset_id FROM pg.changesets WHERE created_at < TIMESTAMPTZ '{iso}'"
-    stats_row = conn.execute(
-        f"SELECT count(*) FROM pg.changeset_stats WHERE changeset_id IN ({old_cs})"
-    ).fetchone()
+    stats_row = conn.execute(f"SELECT count(*) FROM pg.changeset_stats WHERE changeset_id IN ({old_cs})").fetchone()
     cs_row = conn.execute(f"SELECT count(*) FROM pg.changesets WHERE created_at < TIMESTAMPTZ '{iso}'").fetchone()
     stats_n = stats_row[0] if stats_row else 0
     cs_n = cs_row[0] if cs_row else 0

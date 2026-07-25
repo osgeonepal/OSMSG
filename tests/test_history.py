@@ -134,8 +134,7 @@ def _build_dataset(root: Path):
     )
     # full changeset_stats count set; only nodes_created/ways_created vary, rest are 0
     cf_vals = ",\n".join(
-        f"({cid},{uid},{nc},0,0,{wc},0,0,0,0,0,0,0,"
-        f"{('NULL' if ts is None else ts)},TIMESTAMPTZ '{cre}',0,0,0,0,0,0)"
+        f"({cid},{uid},{nc},0,0,{wc},0,0,0,0,0,0,0,{('NULL' if ts is None else ts)},TIMESTAMPTZ '{cre}',0,0,0,0,0,0)"
         for (cid, nc, wc, ts), (_, uid, _n, cre, _e, _h, _b) in zip(_CHANGEFILES, _CHANGESETS, strict=True)
     )
     cf_cols = (

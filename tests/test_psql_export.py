@@ -183,8 +183,20 @@ def test_merge_parquet_changeset_stats_native_tags(fresh_db, tmp_path):
     n = 10
     stats = [
         (
-            1_000 + i, 5000, 99,
-            i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            1_000 + i,
+            5000,
+            99,
+            i,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
             [{"k": "building", "v": "yes", "c": i, "m": 0, "len_m": None}] if i % 2 == 0 else [],
         )
         for i in range(n)
@@ -373,7 +385,23 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
         users=[(77, "carol")],
         changesets=[(900900, 77, None, ["#x"], "JOSM", 10.0, 20.0, 11.0, 21.0)],
         changeset_stats=[
-            (900900, 6000, 77, 5, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, [{"k": "shop", "v": "bakery", "c": 1, "m": 0, "len_m": None}]),  # noqa: E501
+            (
+                900900,
+                6000,
+                77,
+                5,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                5,
+                0,
+                [{"k": "shop", "v": "bakery", "c": 1, "m": 0, "len_m": None}],
+            ),  # noqa: E501
         ],
     )
     merge_parquet_files(fresh_db, tmp_path / "r2", cleanup=True)

@@ -70,8 +70,14 @@ def compare(hashtag: str, start: str | None, end: str | None, api_base: str, ohs
     print(_row("changesets", summary["changesets"], oh["changeset"]["value"], True))
     print(_row("buildings created", _buildings_created(tags), oh["building"]["added"], True))
     print(_row("edits / map_changes", summary["map_changes"], oh.get("edit", {}).get("value", 0), False))
-    print(_row("buildings modified", sum(r["modifies"] for r in tags if r["tag_key"] == "building"),
-              oh["building"]["modified"]["count_modified"], False))
+    print(
+        _row(
+            "buildings modified",
+            sum(r["modifies"] for r in tags if r["tag_key"] == "building"),
+            oh["building"]["modified"]["count_modified"],
+            False,
+        )
+    )
     print()
 
 
