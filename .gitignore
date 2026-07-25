@@ -7,7 +7,8 @@ dist
 .env
 .DS_Store
 node_modules/
-stats.*
+# default-name run outputs at the repo root (anchored so it never swallows osmsg/stats.py)
+/stats.*
 *.parquet
 
 .claude/
