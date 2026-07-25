@@ -1,3 +1,18 @@
+## v1.3.0 (2026-07-25)
+
+### Feat
+
+- **schema**: remove json native schema and add the parquet based
+
+### Fix
+
+- **migrate**: remove migration command to remote hf json
+- **api**: fix the api versioning with all time query support
+- **pipeline**: optimize metadata/tag enrichment for file format outputs
+- **filepath**: fix the dowload as you go and delete the temps
+- **perf**: fixes the query performance of the tag in planet scal e
+- **history**: increase month read attempts and improve HTTP settings for remote ingestion
+
 ## v1.2.5 (2026-06-25)
 
 ### Fix
