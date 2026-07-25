@@ -162,16 +162,13 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
         # Refuse cross-source push: would double-count via the (seq_id, changeset_id) PK.
         local_sources = {r[0] for r in conn.execute("SELECT source_url FROM state").fetchall()}
         existing_sources = {r[0] for r in conn.execute("SELECT source_url FROM pg_target.state").fetchall()}
-        # A granularity handoff (day->hour->minute) retires the coarse changefile source in the local store
-        # but leaves its now-stale resume row in PG. Those sources are superseded by the finer one the store
-        # now tracks and their data is time-disjoint by the handoff boundary, so prune the residual rows
-        # rather than tripping the mixing guard on them. Only the resume row is dropped; the data stays.
+        # A day->hour->minute handoff leaves the coarse source's stale resume row in PG; prune it (data is
+        # time-disjoint by the boundary) so the mixing guard below does not trip on it. Only the row goes.
         superseded = _superseded_changefile_sources(local_sources, existing_sources)
         for stale in superseded:
             conn.execute("DELETE FROM pg_target.state WHERE source_url = ?", [stale])
         existing_sources -= superseded
-        # Every push below is ON CONFLICT DO NOTHING (set semantics), so input order is irrelevant; stream
-        # rather than buffer to keep a large incremental push within the memory_limit.
+        # All pushes are ON CONFLICT DO NOTHING, so order is irrelevant; stream instead of buffering.
         conn.execute("SET preserve_insertion_order = false")
         cross_source = existing_sources - local_sources
         if cross_source and local_sources:

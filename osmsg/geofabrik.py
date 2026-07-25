@@ -36,11 +36,8 @@ def load_index() -> dict[str, str]:
 
 
 def country_update_url(region_id: str) -> str:
-    """Resolve a Geofabrik region id (e.g. ``nepal``) to its `*-updates` base URL.
-
-    Raises:
-        UnknownRegion: if the id is not in the live index.
-    """
+    """Resolve a Geofabrik region id (e.g. ``nepal``) to its `*-updates` base URL. Raises UnknownRegion if
+    the id is not in the live index."""
     idx = load_index()
     key = region_id.lower()
     if key not in idx:

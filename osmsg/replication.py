@@ -47,12 +47,8 @@ def changefile_download_urls(
     resume_seq: int | None = None,
     cs_ts: datetime | None = None,
 ) -> tuple[list[str], datetime, int, int, str, str]:
-    """Resolve [start_seq, last_seq] for the time range, plus the URL list to fetch.
-
-    resume_seq, when given, is used verbatim (no backward pad). cs_ts gates the
-    upper bound on resume ticks: last_seq stays behind cs_ts so every (seq, cs) row
-    written has its parent changeset in place.
-    """
+    """Resolve [start_seq, last_seq] for the time range plus the URL list. resume_seq is used verbatim (no
+    backward pad); cs_ts caps last_seq so every (seq, cs) row's parent changeset is already in place."""
     repl = ReplicationServer(base_url)
 
     if resume_seq is not None:
@@ -158,12 +154,8 @@ class ChangesetReplication:
         *,
         resume_seq: int | None = None,
     ) -> tuple[list[str], int, int]:
-        """Resolve [start_seq, end_seq] for the requested window.
-
-        When ``resume_seq`` is provided (the --update fast path), we trust prior state:
-        every changeset whose minute-diff sequence is < resume_seq has already been
-        captured in the changesets table, so we skip the backward pad entirely.
-        """
+        """Resolve [start_seq, end_seq] for the window. With resume_seq (the --update fast path), every
+        changeset below it is already captured, so the backward pad is skipped."""
         if resume_seq is not None:
             start_seq = resume_seq
         else:

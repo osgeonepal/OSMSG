@@ -1,11 +1,5 @@
-"""Stats correctness, the central guarantees osmsg has to hold:
-
-1. Hand-counted fixtures match the queried output exactly.
-2. Processing the same .osc file twice does not double-count or drop anything.
-3. Multi-worker (parallel) processing produces identical totals to single-worker.
-4. Long-running changesets that span multiple replication files aggregate correctly.
-5. No user is ever silently dropped, every uid in the input shows up in user_stats.
-"""
+"""Stats correctness guarantees: hand-counted fixtures match output exactly; reprocessing an .osc doesn't
+double-count; parallel equals single-worker; multi-file changesets aggregate; no uid is ever dropped."""
 
 from __future__ import annotations
 
@@ -381,16 +375,9 @@ def test_merge_picks_up_every_worker_shard(tmp_path, osc_factory, changefile_con
     assert rows[0]["nodes_created"] == 8
 
 
-# 7) Hashtag pipeline ground-truth, the user-facing guarantee that motivates this tool.
-#    A change to either ChangesetHandler or ChangefileHandler that drops a single
-#    matched changeset, miscounts an element, or loses a hashtag must fail this test.
-#    The fixture mirrors real-world quirks observed in OSM changeset replication:
-#       - hashtag in `comment` only (the classic case)
-#       - hashtag ONLY in the `hashtags` field (was the live regression: "Yovani V")
-#       - hashtag in BOTH fields (must dedup, must not double-count edits)
-#       - same hashtag in different case (substring filter must be case-insensitive)
-#       - changeset that DOES NOT match the filter (must NOT appear and its edits
-#         must NOT be counted, even though they sit in the same .osc file)
+# 7) Hashtag pipeline ground-truth: dropping a matched changeset, miscounting an element, or losing a
+#    hashtag must fail here. Fixture mirrors real quirks (hashtag in comment only, in `hashtags` only,
+#    in both, mixed case, plus a non-matching changeset whose edits must not count).
 
 
 def test_hashtag_pipeline_end_to_end_no_contribution_lost(tmp_path, osc_factory, changefile_config):
@@ -522,10 +509,8 @@ def test_hashtag_pipeline_end_to_end_no_contribution_lost(tmp_path, osc_factory,
 
 
 def test_hashtag_pipeline_drops_unmatched_changeset_elements(tmp_path, osc_factory, changefile_config):
-    """Element edits whose changeset doesn't match the hashtag filter must NOT be counted.
-
-    Direct regression for `_should_collect`: empty `valid_changesets` means the filter
-    matched nothing, drop everything, NOT 'no filter, keep everything'."""
+    """Element edits whose changeset doesn't match the hashtag filter must NOT be counted. Regression for
+    `_should_collect`: empty `valid_changesets` means the filter matched nothing (drop all), not keep all."""
     osc = osc_factory(
         "off.osc",
         [

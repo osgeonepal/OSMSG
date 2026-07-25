@@ -53,10 +53,8 @@ async def home() -> Template:
 
 
 def _root_handlers() -> list:
-    """Serve the built frontend at / when FRONTEND_DIST points to a directory, else the API home page.
-    The API routes (/health, /api/*, /docs) are registered explicitly and take precedence over the
-    static catch-all; html_mode returns index.html for directory and client-side routes. The frontend
-    uses window.location.origin as its API base, so same-origin serving needs no extra config."""
+    """Serve the built frontend at / when FRONTEND_DIST is a directory, else the API home page. Explicit API
+    routes (/health, /api/*, /docs) take precedence over the static catch-all; html_mode serves index.html."""
     if FRONTEND_DIST and Path(FRONTEND_DIST).is_dir():
         return [create_static_files_router(path="/", directories=[FRONTEND_DIST], html_mode=True)]
     return [home]

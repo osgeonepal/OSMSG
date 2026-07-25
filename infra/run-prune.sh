@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Delete Postgres rows now covered by published history (created_at < frontier - overlap). Runs the
-# osmsg CLI inside the compose network so it can reach the db service. A no-op until the frontier
-# advances after the monthly maintain publish.
+# Delete Postgres rows now covered by published history. Runs the osmsg CLI in the compose network
+# (to reach the db service); a no-op until the frontier advances after a maintain publish.
 set -euo pipefail
 
 cd /opt/osmsg/infra

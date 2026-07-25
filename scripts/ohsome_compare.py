@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Compare osmsg's v2 API against ohsomeNow for a hashtag over an optional window.
+"""Compare osmsg's v2 API against ohsomeNow for a hashtag over an optional window. Contributors,
+changesets, and buildings-created are comparable; edits and buildings-modified differ by design.
 
-Compares the metrics whose definitions coincide (contributors, changesets, buildings created) and
-labels the ones that differ by design: osmsg counts every element-version bump, while ohsome propagates
-geometry (moving a node marks the parent way modified), so "edits" and "buildings modified" are not
-comparable.
-
-Usage:
-  scripts/ohsome_compare.py hotosm --start 2026-07-01 --end 2026-07-25
-  scripts/ohsome_compare.py hotosm --api-base https://api.osmsg.osgeonepal.org
+Usage: scripts/ohsome_compare.py hotosm --start 2026-07-01 --end 2026-07-25
 """
 
 import argparse

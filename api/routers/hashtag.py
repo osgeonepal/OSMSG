@@ -1,8 +1,6 @@
-"""All-time hashtag endpoints, served DuckDB-on-top: the published hashtag_changeset artifact
-(history) combined with the recent tail derived on the fly from the base Postgres tables, through
-osmsg's shared query surface. The path hashtag is comma-separated for multiple tags
-(`/hashtag/hotosm,osmnepal/summary`), each matched as a prefix, the union deduped by changeset. An
-optional half-open [start, end) window narrows any endpoint to a time range; omit both for all-time.
+"""Hashtag endpoints, served DuckDB-on-top (published hashtag_changeset artifact for history + recent tail
+from the base Postgres tables). The path hashtag is comma-separated for multiple prefixes, the union
+deduped by changeset; an optional half-open [start, end) window narrows any endpoint, omit both for all-time.
 """
 
 from datetime import datetime

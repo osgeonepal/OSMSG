@@ -12,12 +12,8 @@ _MEMORY_LIMIT_RE = re.compile(r"^\d+(\.\d+)?\s?(B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$"
 
 
 def _apply_runtime_pragmas(conn: duckdb.DuckDBPyConnection) -> None:
-    """Bound DuckDB memory and point spilling at a roomy disk, from operator env.
-
-    Unset means DuckDB defaults, so library and test behaviour is unchanged. On a
-    memory-capped host these keep a large merge/aggregation spilling to disk instead
-    of aborting with an out-of-memory error.
-    """
+    """Bound DuckDB memory and point spilling at a roomy disk, from operator env. Unset means DuckDB
+    defaults, so a large merge spills to disk instead of OOMing on a memory-capped host."""
     memory_limit = os.environ.get("OSMSG_DUCKDB_MEMORY_LIMIT")
     if memory_limit:
         if not _MEMORY_LIMIT_RE.match(memory_limit):

@@ -1,9 +1,5 @@
-"""Single source of truth for how contribution stats are computed.
-
-The schema is fixed (`changeset_stats`/`changefiles` for counts, `changesets` for hashtags
-and editor) and the aggregation is fixed, so the same numbers come out whichever engine
-runs the query. Any change to what a stat means happens here and nowhere else.
-"""
+"""Single source of truth for how contribution stats are computed: schema and aggregation are fixed, so
+the same numbers come out on any engine. Any change to what a stat means happens here alone."""
 
 from __future__ import annotations
 
@@ -23,9 +19,8 @@ COUNT_COLS: tuple[str, ...] = (
 # map_changes counts real geometry edits: nodes, ways, relations. poi is a derived tag view, excluded.
 MAP_CHANGES_COLS: tuple[str, ...] = tuple(c for c in COUNT_COLS if not c.startswith("poi"))
 
-# The one representation of a per-changeset tag breakdown, used everywhere: the DuckDB store, Postgres,
-# and the published changefiles/rollup datasets. A list of (key, value, creates, modifies, length_m),
-# stored as a DuckDB LIST<STRUCT> and, in Postgres, an array of the named composite type PG_TAG_TYPE.
+# The one per-changeset tag breakdown used everywhere (store, Postgres, published datasets): a DuckDB
+# LIST<STRUCT> of (key, value, creates, modifies, length_m), or in Postgres a PG_TAG_TYPE array.
 TAG_STRUCT_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)"
 PG_TAG_TYPE = "osmsg_tag"
 PG_TAG_FIELDS = "k text, v text, c bigint, m bigint, len_m double precision"

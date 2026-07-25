@@ -16,10 +16,9 @@ _SUMS = ", ".join(f"sum({col}) AS {col}" for col in _COUNT_COLS)
 
 
 def hashtag_changeset_select(stats_rel: str = "changeset_stats", changesets_rel: str = "changesets") -> str:
-    """SELECT expanding the store into one row per (hashtag, changeset). Counts are summed across a
-    changeset's seq rows and tag_stats merged, so it is correct whether rows are per-diff (live) or the
-    single seq_id=0 history row. `lon`/`lat` carry the changeset bbox centroid (for the map). Sorted by
-    lowercased hashtag so a prefix range prunes row groups."""
+    """SELECT expanding the store into one row per (hashtag, changeset): counts summed across a changeset's
+    seq rows and tags merged, correct for both per-diff (live) and seq_id=0 (history) rows. `lon`/`lat` are
+    the bbox centroid; sorted by lowercased hashtag so a prefix range prunes row groups."""
     sums = ", ".join(f"SUM(s.{c}) AS {c}" for c in _COUNT_COLS)
     payload = ", ".join(f"p.{c}" for c in _COUNT_COLS)
     return f"""
@@ -96,10 +95,9 @@ def build_month_rollups(year: int, month: int, out: pathlib.Path) -> None:
 
 
 def _refresh_hashtag_changeset(con: duckdb.DuckDBPyConnection, out: pathlib.Path) -> None:
-    """Merge this month's (hashtag, changeset) rows into the single hashtag-sorted file. One row per
-    (hashtag, changeset) with the full per-changeset payload; changefiles is already per-changeset, so
-    no seq aggregation. Idempotent: a re-run replaces the month's changesets. Sorted by hashtag so a
-    prefix range prunes row groups, kept as one file so a remote query opens one footer, not many."""
+    """Merge this month's (hashtag, changeset) rows into the single hashtag-sorted file, idempotent (a
+    re-run replaces the month). changefiles is already per-changeset, so no seq aggregation; sorted by
+    hashtag and kept as one file so a prefix range prunes and a remote query opens one footer."""
     hc = out / "rollup" / "hashtag_changeset" / "data.parquet"
     cf_counts = ", ".join(f"cf.{c}" for c in _COUNT_COLS)
     con.execute(

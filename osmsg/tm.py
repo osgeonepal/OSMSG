@@ -31,12 +31,8 @@ def _fetch_one(project_id: str) -> tuple[str, list[dict[str, Any]]]:
 
 
 def fetch_user_stats(project_ids: list[str], usernames: set[str]) -> dict[str, dict[str, Any]]:
-    """Aggregate tasks_mapped/validated/total per matching user across all projects.
-
-    Project requests are issued in parallel with a bounded thread pool, the public
-    TM API is rate-limited but tolerant of small bursts; failures are absorbed
-    silently so one bad project never breaks an entire run.
-    """
+    """Aggregate tasks_mapped/validated/total per matching user across projects, requested in parallel
+    with a bounded thread pool; a failed project is skipped so one bad project never breaks a run."""
     by_user: defaultdict[str, dict[str, Any]] = defaultdict(
         lambda: {"tm_mapping_level": None, "tasks_mapped": 0, "tasks_validated": 0, "tasks_total": 0}
     )

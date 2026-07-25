@@ -1,9 +1,5 @@
-"""Pydantic models for the osmsg processing pipeline.
-
-In-handler the stats use ergonomic helpers (`ElementStat`, `TagValueStat`).
-On the way to the DB they flatten to plain integer columns (`to_row()`).
-The DB schema is therefore portable across DuckDB, Parquet, and PostgreSQL.
-"""
+"""Pydantic models for the pipeline. In-handler stats use ergonomic helpers, then flatten to plain
+columns (`to_row()`) for a schema portable across DuckDB, Parquet, and Postgres."""
 
 from __future__ import annotations
 
@@ -112,9 +108,7 @@ class ChangesetStats(BaseModel):
         return self.nodes.total + self.ways.total + self.rels.total
 
     def tags_list(self) -> list[dict[str, Any]]:
-        """Flat native tag rows for the shard's LIST<STRUCT(k,v,c,m,len_m)> column. The handler already
-        holds the breakdown natively, so the shard stores it as a native list (read straight into the
-        store) instead of a JSON string that the ingest would have to re-parse."""
+        """Flat native tag rows ({k,v,c,m,len_m}) for the shard's LIST<STRUCT> column, so ingest is a copy."""
         return [
             {"k": key, "v": value, "c": tv.c, "m": tv.m, "len_m": round(tv.len, 2) if tv.len is not None else None}
             for key, by_value in self.tag_stats.items()

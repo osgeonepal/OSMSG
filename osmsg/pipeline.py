@@ -174,11 +174,8 @@ _BOOTSTRAP_PRESETS = {
 
 
 def _bootstrap_window_start(now: dt.datetime | None = None) -> dt.datetime:
-    """Resolve the auto-bootstrap start_date for a fresh --update.
-
-    OSMSG_BOOTSTRAP_DAYS=N wins over OSMSG_BOOTSTRAP=hour|day|week. Defaults to one hour,
-    matching the worker tick in osmsg/_tick.py.
-    """
+    """Resolve the auto-bootstrap start_date for a fresh --update: OSMSG_BOOTSTRAP_DAYS=N wins over
+    OSMSG_BOOTSTRAP=hour|day|week, default one hour (matching the worker tick)."""
     now = now or dt.datetime.now(UTC)
     days_env = os.environ.get("OSMSG_BOOTSTRAP_DAYS")
     if days_env:
@@ -447,9 +444,8 @@ def _finalize(
         raise NoDataFoundError("No stats produced for the requested time range.")
     _store_fingerprint(conn, fingerprint)
 
-    # Per-user metadata/tag enrichment feeds only the file-format writers; a psql push writes the raw
-    # tables and never reads these rows. Skip it when no file format is requested, so a psql-only run
-    # never materializes every row's tags at once (multi-GB on a large store).
+    # Per-user tag/metadata enrichment feeds only the file writers, not the psql push; skip it for a
+    # psql-only run so it never materializes every row's tags at once (multi-GB on a large store).
     if _FILE_FORMATS & set(cfg.formats) or cfg.summary:
         if cfg.changeset or cfg.hashtags:
             attach_metadata(conn, rows)
@@ -527,14 +523,9 @@ def _finalize(
 
 
 def _ensure_credentials(cfg: RunConfig) -> str | None:
-    """Resolve OSM credentials and exchange them for a Geofabrik OAuth 2.0 cookie.
-
-    Resolution order: explicit `RunConfig` fields → `OSM_USERNAME` / `OSM_PASSWORD`
-    env vars → interactive prompt (only if stdin is a TTY).
-
-    Raises `CredentialsRequiredError` if a geofabrik URL is in use but no credentials
-    can be obtained non-interactively (library users running headless).
-    """
+    """Resolve OSM credentials (RunConfig fields, then OSM_USERNAME/OSM_PASSWORD, then a TTY prompt) and
+    exchange them for a Geofabrik OAuth cookie; raises CredentialsRequiredError if a geofabrik URL needs
+    credentials none can be obtained headless."""
     if not any("geofabrik" in u.lower() for u in cfg.urls):
         return None
 

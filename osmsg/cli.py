@@ -1,7 +1,5 @@
-"""Typer-based CLI for osmsg.
-
-UTC throughout, no display timezone. Outputs default to parquet (queryable from
-disk by DuckDB / polars / pandas). Other formats: csv, json, markdown, psql.
+"""Typer-based CLI for osmsg. UTC throughout; outputs default to parquet (queryable from disk by DuckDB/
+polars/pandas), other formats csv, json, markdown, psql.
 """
 
 from __future__ import annotations

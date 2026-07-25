@@ -10,12 +10,8 @@ from osmsg.handlers import ChangefileHandler, ChangesetHandler
 
 
 def _write_changeset_xml(tmp_path, name, changesets):
-    """Hand-written changeset XML, osmium's SimpleWriter doesn't support changesets.
-
-    Pass ``open=True`` to emit a still-open entry (no ``closed_at`` attribute), that
-    matches what OSM replication serializes for changesets that haven't closed yet,
-    and is what osmium turns into ``closed_at = 1970-01-01`` (the epoch sentinel).
-    """
+    """Hand-written changeset XML (osmium's SimpleWriter can't write changesets). open=True emits a
+    still-open entry (no closed_at), which osmium reads as the epoch-sentinel closed_at, as live does."""
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<osm version="0.6">',
@@ -294,10 +290,9 @@ def test_changeset_handler_first_seen_wins_on_duplicate_ids(tmp_path, changeset_
 
 
 def test_changeset_handler_window_filter_drops_only_pre_window_closures(tmp_path, changeset_config):
-    """Backward-pad changesets that closed entirely before window_start are dropped (they'd
-    leak hashtags onto in-window users via attach_metadata). Everything else, including
-    changesets created past window_end, is kept so the next tick (which resumes at
-    last_seq+1) doesn't have to refetch them; otherwise they'd remain permanent stubs."""
+    """Backward-pad changesets closed before window_start are dropped (they'd leak hashtags onto in-window
+    users); everything else, including post-window-end creations, is kept so the next resume tick needn't
+    refetch them."""
     changeset_config["hashtags"] = ["#hotosm"]
     changeset_config["window_start_utc"] = dt.datetime(2026, 4, 27, 21, 4, tzinfo=dt.UTC)
     changeset_config["window_end_utc"] = dt.datetime(2026, 4, 27, 21, 54, tzinfo=dt.UTC)

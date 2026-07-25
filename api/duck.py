@@ -1,12 +1,6 @@
-"""DuckDB-on-top query layer. One engine answers hashtag stats from the published hashtag_changeset
-artifact (history) plus the recent tail derived on the fly from the base Postgres tables, through
-osmsg's shared query surface, so the API computes identically to the CLI. DuckDB is synchronous;
-litestar calls these via a thread pool.
-
-There is no materialized recent rollup: `osmsg.catalog` filters the base `changeset_stats`/`changesets`
-by the requested hashtag first, so only matching changesets are read and the recent side is always as
-fresh as Postgres. History is a local copy of the artifact (fast) or `hf://`. The split frontier comes
-from the dataset manifest, re-read on a TTL so a newly published month is picked up without a restart.
+"""DuckDB-on-top query layer: answers hashtag stats from the published hashtag_changeset artifact (history)
+plus the recent tail derived on the fly from the base Postgres tables, so the API matches the CLI. No
+materialized recent rollup; the split frontier is re-read on a TTL so a newly published month needs no restart.
 """
 
 from __future__ import annotations

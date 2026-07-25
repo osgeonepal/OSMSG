@@ -23,10 +23,8 @@ def _has_state(db_path: Path, source_url: str) -> bool:
 
 
 def _has_any_state(db_path: Path) -> bool:
-    """True if the store has a resume position for ANY source. A `--insert --seed-only` seeds the source
-    at the granularity matched to the gap (e.g. day), which differs from this tick's default source
-    (minute); `--update` reads the store's own tracked source and continues/auto-refines it, so any
-    seeded state means we continue rather than bootstrap to now."""
+    """True if the store has a resume position for ANY source, so `--update` continues (and auto-refines)
+    it instead of re-bootstrapping."""
     if not db_path.exists():
         return False
     conn = connect(str(db_path))
@@ -74,14 +72,12 @@ def main() -> int:
         if not (extra_set & {"--all", "--keys"}):
             cmd.append("--all")
 
-        # A country run tracks one specific geofabrik source; the planet run continues whatever the store
-        # was seeded with (possibly a coarser source than this tick's default), so accept any state.
+        # Country tracks one geofabrik source; the planet run continues whatever was seeded, so accept any.
         has_state = _has_state(db_path, source_url) if country else _has_any_state(db_path)
         if has_state:
             cmd.append("--update")
         else:
-            # Cold start at day granularity (coarse, few files); --update then refines day->hour->minute
-            # as the backlog shrinks. A normal deployment seeds the same way via `--insert`.
+            # Cold start at day granularity; --update then refines to hour/minute as the backlog shrinks.
             if explicit_url is None and not country:
                 cmd.extend(["--url", "day"])
             cmd.extend(["--days", bootstrap_days])

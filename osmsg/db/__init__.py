@@ -1,15 +1,5 @@
-"""DuckDB persistence: schema, ingest, queries.
-
-The schema is portable: identical column shape works in DuckDB, Parquet, and
-PostgreSQL, exporters re-issue the CREATE TABLE there.
-
-Public surface:
-
-    >>> from osmsg.db import connect, create_tables, user_stats
-    >>> conn = connect("stats.duckdb")
-    >>> create_tables(conn)
-    >>> rows = user_stats(conn, top_n=10)
-"""
+"""DuckDB persistence: schema, ingest, queries. The schema is portable (same column shape in DuckDB,
+Parquet, and Postgres); exporters re-issue the CREATE TABLE there."""
 
 from .ingest import flush_rows_to_parquet, merge_parquet_files
 from .queries import (

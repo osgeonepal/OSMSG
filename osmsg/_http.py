@@ -1,7 +1,5 @@
-"""Shared `requests.Session` with retry policy + connect/read timeouts.
-
-Every HTTP call in osmsg goes through this session so retry behaviour and
-timeout defaults are consistent. Per-request `timeout=` still wins.
+"""Shared `requests.Session` with a retry policy and connect/read timeouts, so every osmsg HTTP call is
+consistent. A per-request `timeout=` still wins.
 """
 
 from __future__ import annotations

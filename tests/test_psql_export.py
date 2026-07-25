@@ -1,7 +1,5 @@
-"""Schema validation for the PostgreSQL exporter.
-
-A live push test requires a Postgres instance and is gated behind the
-`OSMSG_PG_DSN` env var (mark `network` to deselect by default).
+"""Schema validation for the PostgreSQL exporter. A live push test needs a Postgres instance and is gated
+behind `OSMSG_PG_DSN` (marked `network`, deselected by default).
 """
 
 from __future__ import annotations

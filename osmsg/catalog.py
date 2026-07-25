@@ -1,11 +1,6 @@
-"""Assemble query sources into one relation so `stats.py` runs a single query regardless of where
-data lives. History (older than the published frontier) comes from the `hashtag_changeset` rollup;
-the recent tail (from the frontier on) is derived on the fly from the base tables, filtered by the
-hashtag first so only matching changesets are read. The two are unioned and split at the frontier, so
-nothing is counted twice and nothing is dropped, and the recent side is always as fresh as the base.
-
-The base is just relations: a local DuckDB store's `changeset_stats`/`changesets`, or an attached
-Postgres's `pg.changeset_stats`/`pg.changesets`. Either way the query runs in DuckDB.
+"""Assemble query sources into one relation so `stats.py` runs a single query wherever data lives: history
+(< frontier) from the `hashtag_changeset` rollup, the recent tail from the base tables (a local DuckDB store
+or attached Postgres, hashtag-filtered first), unioned and split at the frontier. The query runs in DuckDB.
 """
 
 from __future__ import annotations
@@ -32,12 +27,9 @@ def _window_clause(start: dt.datetime | None, end: dt.datetime | None) -> tuple[
 
 
 def _recent_from_base(stats_rel: str, changesets_rel: str, window_sql: str, prefix_pred: str) -> str:
-    """Per-changeset rows built on the fly from the base tables for changesets whose hashtags match any
-    requested prefix and are on/after the frontier. Counts are summed across a changeset's seq rows and
-    the native `tags` lists merged, matching the rollup shape exactly (one tag representation, one
-    breakdown path). The changeset filter runs first, so only matching changesets are read. `prefix_pred`
-    is the OR of `lower(h) >= ? AND lower(h) < ?` range tests on the lambda var. Placeholders, in order:
-    frontier, (window bounds), (prefix bounds)."""
+    """Per-changeset rows built on the fly from the base tables for matching changesets on/after the
+    frontier, counts summed across seq rows and native `tags` merged to match the rollup shape. `prefix_pred`
+    OR-s `lower(h) >= ? AND lower(h) < ?`; placeholders in order: frontier, (window bounds), (prefix bounds)."""
     sums = ", ".join(f"SUM(s.{c}) AS {c}" for c in COUNT_COLS)
     payload = ", ".join(f"p.{c}" for c in COUNT_COLS)
     return f"""
@@ -79,13 +71,10 @@ def hashtag_scope(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> tuple[str, list[object]]:
-    """One deduped per-changeset relation for one or more hashtag prefix ranges [lo, hi): the rollup for
-    history (created_at < frontier, hashtag range prunes row groups) unioned with the recent tail
-    derived from the base (created_at >= frontier). A changeset matching more than one prefix (or
-    carrying two matching hashtags) is deduped by changeset_id, so it counts once. An optional half-open
-    [start, end) window bounds created_at on both sides, so it intersects the frontier split cleanly (a
-    window entirely before the frontier reads only history; entirely after, only the base). `prefixes`
-    must be non-empty. Returns (sql, params)."""
+    """One deduped per-changeset relation for hashtag prefix ranges [lo, hi): the rollup for history
+    (< frontier) unioned with the recent tail from the base (>= frontier), deduped by changeset_id so a
+    changeset matching several prefixes counts once. Optional [start, end) window bounds created_at.
+    Returns (sql, params)."""
     if not prefixes:
         raise ValueError("prefixes must be non-empty")
     window_sql, window_params = _window_clause(start, end)
@@ -120,11 +109,9 @@ def history_dedup_scope(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> tuple[str, list[object]]:
-    """The deduped per-changeset HISTORY relation alone (created_at < frontier), as its own SELECT so a
-    caller can aggregate it and the recent side SEPARATELY and combine the small results. This avoids
-    DISTINCT ON over the history+recent UNION, which forces DuckDB to materialize the whole 14M-row
-    intermediate for a big hashtag; aggregating each side first keeps the history dedup streaming.
-    `prefixes` must be non-empty. Returns (sql, params)."""
+    """The deduped per-changeset HISTORY relation alone (< frontier), as its own SELECT so a caller can
+    aggregate it and the recent side separately, avoiding a DISTINCT ON over the full union that would
+    materialize the whole 14M-row intermediate for a big hashtag. `prefixes` non-empty. Returns (sql, params)."""
     if not prefixes:
         raise ValueError("prefixes must be non-empty")
     window_sql, window_params = _window_clause(start, end)
@@ -186,11 +173,8 @@ def map_scope(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> tuple[str, list[object]]:
-    """Deduped changeset centroids `(changeset_id, uid, lon, lat)` for the hashtag union, for the map.
-    History centroids come from the rollup's `lon`/`lat`; recent centroids from the base changesets bbox
-    midpoint (`recent_changesets_rel` must expose min_lon/min_lat/max_lon/max_lat, e.g. the published
-    changesets dataset or the Postgres `changesets` table). Changesets with no bbox are dropped. Same
-    frontier split and optional [start, end) window as `hashtag_scope`. `prefixes` must be non-empty."""
+    """Deduped changeset centroids `(changeset_id, uid, lon, lat)` for the hashtag union: from the rollup
+    `lon`/`lat` (history) and the base changesets bbox midpoint (recent). No-bbox changesets are dropped."""
     if not prefixes:
         raise ValueError("prefixes must be non-empty")
     window_sql, window_params = _window_clause(start, end)

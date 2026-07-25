@@ -1,7 +1,5 @@
-"""typer CliRunner sanity tests for major flag combinations.
-
-These don't exercise the OSM network, they verify the parser wiring, period
-resolution, mutual-exclusion checks, and error paths.
+"""typer CliRunner sanity tests for major flag combinations: parser wiring, period resolution,
+mutual-exclusion checks, and error paths (no OSM network).
 """
 
 from __future__ import annotations

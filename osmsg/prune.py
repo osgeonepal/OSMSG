@@ -1,8 +1,4 @@
-"""Prune Postgres of the recent tail now covered by published history. When a month is published to
-HuggingFace the frontier advances; rows older than (frontier - overlap) are then served from the
-published history and never read from Postgres, so they can be deleted to keep it to the live tail.
-The overlap buffer keeps a couple of days beyond the frontier as belt-and-suspenders for a month that
-stops slightly short of its boundary."""
+"""Prune Postgres of rows now served from published history, keeping it to the uncovered live tail."""
 
 import datetime as dt
 
@@ -16,9 +12,8 @@ DEFAULT_OVERLAP = dt.timedelta(days=2)
 
 
 def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
-    """Delete changesets (and their changeset_stats) with created_at < cutoff from the Postgres target.
-    Child rows go first to respect the FK. Returns (changeset_stats_deleted, changesets_deleted). The DSN
-    is interpolated into ATTACH, so it must be trusted."""
+    """Delete changesets and their changeset_stats older than cutoff; child rows first for the FK. The
+    DSN is interpolated into ATTACH, so it must be trusted."""
     conn = duckdb.connect()
     conn.execute("INSTALL postgres")
     conn.execute("LOAD postgres")
@@ -37,8 +32,7 @@ def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
 
 
 def prune_covered(dsn: str, history_url: str, overlap: dt.timedelta = DEFAULT_OVERLAP) -> tuple[int, int]:
-    """Read the published frontier and prune Postgres up to (frontier - overlap). Returns the deleted
-    (changeset_stats, changesets) counts; (0, 0) when the manifest is unreadable or nothing is covered."""
+    """Prune Postgres up to the published frontier minus the overlap buffer."""
     manifest = fetch_manifest(history_url)
     if manifest is None:
         raise OsmsgError(f"could not read the manifest at {history_url}")

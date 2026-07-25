@@ -123,12 +123,9 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
         # read_parquet() takes a literal, escape so quoted paths can't break out.
         return _sql_escape((parquet_dir / f"temp_*_{name}_*.parquet").as_posix())
 
-    # Each step auto-commits (no enclosing transaction): DuckDB keeps an uncommitted transaction's changes
-    # and the non-spillable PK index in memory until COMMIT, so wrapping a whole multi-day window in one
-    # transaction exhausts a constrained memory_limit. Every statement here is idempotent (INSERT OR IGNORE,
-    # COALESCE update), so committing per step - and re-merging leftover shards after a crash - is safe.
-    # preserve_insertion_order=false lets the merges stream instead of buffering rows to preserve order.
-    conn.execute("SET preserve_insertion_order = false")
+    # No enclosing transaction: one transaction over a large window pins too much in memory. Each
+    # statement is idempotent (INSERT OR IGNORE / COALESCE), so per-step auto-commit is crash-safe.
+    conn.execute("SET preserve_insertion_order = false")  # stream, don't buffer to preserve order
     try:
         if any(parquet_dir.glob("temp_*_users_*.parquet")):
             conn.execute(f"INSERT OR IGNORE INTO users SELECT uid, username FROM read_parquet('{pattern('users')}')")

@@ -82,8 +82,8 @@ def prune_pg_cmd(
         int, typer.Option("--overlap-days", help="Keep this many days beyond the frontier before deleting.")
     ] = 2,
 ) -> None:
-    """Delete Postgres rows now covered by published history (created_at < frontier - overlap), keeping
-    Postgres to the uncovered live tail. Safe to run on any cadence; a no-op until the frontier advances."""
+    """Delete Postgres rows now covered by published history (before frontier - overlap). No-op until the
+    frontier advances."""
     from ..prune import prune_covered
 
     prune_covered(psql_dsn, history_url, overlap=dt.timedelta(days=overlap_days))

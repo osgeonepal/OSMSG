@@ -1,10 +1,6 @@
-"""ChangesetReplication URL math: backward-pad behavior and the resume-seq fast path.
-
-The pad covers still-open changesets opened before window start whose first edits
-land inside the window. OSM caps changeset open time at 24h, so 24h is the maximum
-useful pad. Default is 1h to keep first bootstraps cheap; --update runs skip the
-pad entirely once they have prior state.
-"""
+"""ChangesetReplication URL math: backward-pad and the resume-seq fast path. The pad covers still-open
+changesets opened before window start (OSM caps open time at 24h, so 24h max; default 1h); --update runs
+with prior state skip it."""
 
 from __future__ import annotations
 
@@ -221,10 +217,9 @@ def test_changefile_forward_pad_clamps_at_server_head(changefile_repl):
     assert last_seq == cur_seq
 
 
-# cs_ts sync gate: keeps changefile from outpacing changeset replication on --update ticks.
-# Without it, a tick can fetch changefile minute-diff N+1 before changeset minute-diff N+1
-# is published, dropping (seq, cs) rows whose parent isn't in `changesets` yet (FK-orphan
-# stubs that only resolve next tick once the changeset side catches up).
+# cs_ts sync gate: keeps changefile from outpacing changeset replication on --update ticks, else a tick
+# fetches changefile diff N+1 before changeset diff N+1 is published, orphaning (seq, cs) rows whose
+# parent changeset isn't in `changesets` yet.
 
 
 def _resume_seq_call(changefile_repl, **kwargs):

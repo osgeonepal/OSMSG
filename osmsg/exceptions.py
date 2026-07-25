@@ -1,7 +1,5 @@
-"""Typed exceptions for library callers.
-
-The CLI layer catches these and translates to exit codes; library users catch
-them where they integrate the pipeline.
+"""Typed exceptions for library callers. The CLI catches these and translates to exit codes; library users
+catch them where they integrate the pipeline.
 """
 
 from __future__ import annotations

@@ -46,10 +46,8 @@ def _seed_state(out_dir: Path, name: str, source_url: str) -> None:
 
 
 def test_explicit_url_with_country_resolves_state_under_explicit_url(tmp_path, monkeypatch, captured_cmd, clean_env):
-    """--country + explicit --url: state row is keyed by the explicit URL (pipeline rule).
-
-    Regression guard: previously _tick looked up state under the country's geofabrik URL,
-    never found it, and re-bootstrapped every tick (wiping the DuckDB each time).
+    """--country + explicit --url: the state row is keyed by the explicit URL, not the country's geofabrik
+    URL (previously never found there, re-bootstrapping and wiping the DuckDB every tick).
     """
     name = "nepal"
     _seed_state(tmp_path, name, SHORTCUTS["minute"])
@@ -116,12 +114,8 @@ def test_bootstrap_days_sets_cold_start_window(tmp_path, monkeypatch, captured_c
 
 
 def test_tick_lifecycle_cold_then_warm(tmp_path, monkeypatch, clean_env):
-    """Cold tick bootstraps; the next tick (after state lands) must switch to --update.
-
-    End-to-end guard for the bug: tick 0 bootstraps, the pipeline writes a state row
-    under the planet/minute URL, tick 1 must find that row instead of looking under
-    the geofabrik URL and re-bootstrapping forever.
-    """
+    """Cold tick bootstraps; the next tick (after the state row lands under the planet/minute URL) must
+    switch to --update instead of re-bootstrapping under the geofabrik URL forever."""
     calls: list[list[str]] = []
 
     def fake_call(cmd, *args, **kwargs):

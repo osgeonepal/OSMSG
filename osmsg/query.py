@@ -1,14 +1,6 @@
-"""The hashtag query surface: summary, leaderboard, tag breakdown, editors, trends, map. Built once here
-from the catalog + stats vocabulary so the CLI and API compute identically. The caller supplies a DuckDB
-connection with the sources reachable (local tables, an attached Postgres, or read_parquet('hf://...')).
-
-Performance shape (load-bearing): history and recent are DISJOINT at the frontier, so instead of
-DISTINCT ON over their UNION (which makes DuckDB materialize the whole multi-million-row history
-intermediate for a big hashtag), each function aggregates the deduped history and the recent tail
-SEPARATELY to a small per-grain result, then combines those. The history dedup streams; only the small
-aggregate is materialized. This keeps even the largest hashtags fast when the engine has room to hold
-the dedup hash table (see OSMSG_DUCKDB_MEMORY_LIMIT).
-"""
+"""The hashtag query surface (summary, leaderboard, tags, editors, trends, map), built from the catalog
++ stats vocabulary so the CLI and API compute identically. History and recent are disjoint at the
+frontier, so each function aggregates them separately and combines, keeping large hashtags fast."""
 
 from __future__ import annotations
 
@@ -26,11 +18,8 @@ from .stats import COUNT_COLS, map_changes_expr, map_changes_sum, prefix_upper_b
 
 @dataclass(frozen=True)
 class Sources:
-    """Where the per-changeset rows and usernames live. `history_rel` is the published rollup relation
-    (a table name or `read_parquet(...)`) serving everything before `frontier`; the recent tail from the
-    frontier on is derived on the fly from the base tables `recent_stats_rel` (changeset_stats) and
-    `recent_changesets_rel` (changesets), so it is always as fresh as the store. `users_rel` maps
-    uid -> username."""
+    """Where per-changeset rows and usernames live: `history_rel` (published rollup) serves before
+    `frontier`; the recent tail comes live from `recent_stats_rel`/`recent_changesets_rel`."""
 
     history_rel: str
     recent_stats_rel: str
@@ -125,10 +114,8 @@ def _attach_user_tags(
     rsql: str,
     rp: list[object],
 ) -> None:
-    """In-place: attach per-user `tag_stats` (nested `{key: {value: {c, m}}}`) to leaderboard rows,
-    aggregating the native `tags` lists for just the returned page of users. Re-runs the deduped history
-    and recent SELECTs filtered to those uids (cheap for the small/medium hashtags this runs for). Sets an
-    empty `tag_stats` on every row when the page is empty."""
+    """In-place: attach per-user `tag_stats` (nested `{key:{value:{c,m}}}`) to the returned leaderboard
+    page, aggregating the native `tags` lists for just those uids."""
     for r in rows:
         r["tag_stats"] = {}
     if not rows:
@@ -161,10 +148,8 @@ def _attach_user_hashtags(
     start: dt.datetime | None,
     end: dt.datetime | None,
 ) -> None:
-    """In-place: attach the distinct hashtags each returned user contributed under (matching the queried
-    prefixes), for the modal's per-user hashtag grid. History hashtags come straight from the rollup's
-    `hashtag` column; recent from the base changesets' `hashtags` list. Bounded to the returned page's
-    uids and hashtag-range-pruned, so it stays cheap even for a mega-hashtag. Empty list when unmatched."""
+    """In-place: attach the distinct matching hashtags each returned user contributed under, from the
+    rollup `hashtag` column (history) and the base changesets' `hashtags` list (recent)."""
     for r in rows:
         r["hashtags"] = []
     if not rows:
@@ -231,14 +216,9 @@ def leaderboard(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> dict[str, Any]:
-    """One page of the hashtag leaderboard as a pagination envelope
-    `{items, page, page_size, total, total_pages}`. Users are aggregated once (deduped history combined
-    with the recent tail) into a small per-user table; `total` is the distinct users matching the
-    optional `q` name search, and `items` is the requested page ordered by `sort`/`order`. Each item
-    carries the full element breakdown, editors, `rank` (position in the sorted result), and, for
-    hashtags small enough to afford it, a per-user `tag_stats` breakdown (empty otherwise; the aggregate
-    lives on `/tags`). Optional [start, end) window. `sort` must be in `LEADERBOARD_SORTS`, `order` in
-    {asc, desc}; both are validated."""
+    """One page of the hashtag leaderboard as `{items, page, page_size, total, total_pages}`, ordered by
+    `sort`/`order` and filtered by the optional `q` name search and [start, end) window. Per-user
+    `tag_stats` is attached only for hashtags small enough to afford it; the aggregate lives on `/tags`."""
     if sort not in LEADERBOARD_SORTS:
         raise ValueError(f"sort must be one of {tuple(LEADERBOARD_SORTS)}")
     if order not in ("asc", "desc"):
@@ -376,10 +356,8 @@ def hashtags(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> list[dict[str, Any]]:
-    """Trending hashtags within the queried scope: the matched hashtags with their distinct contributors
-    and total map changes (edits). History from the rollup `hashtag` column + count columns, recent from
-    the base changesets' `hashtags` list joined to changeset_stats. Optional [start, end) window. Returns
-    `[{hashtag, users, edits}]`, most contributors first."""
+    """Matched hashtags with their distinct contributors and total edits, most contributors first:
+    `[{hashtag, users, edits}]`. Optional [start, end) window."""
     prefixes = _prefixes(hashtag)
     window_sql, window_params = catalog._window_clause(start, end)
     prefix_params = [bound for pair in prefixes for bound in pair]
