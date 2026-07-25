@@ -1,3 +1,9 @@
+## v1.3.1 (2026-07-25)
+
+### Fix
+
+- **ty**: fix test cases and precommit hooks
+
 ## v1.3.0 (2026-07-25)
 
 ### Feat
