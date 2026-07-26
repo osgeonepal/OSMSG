@@ -13,6 +13,10 @@ _BULK_INDEXES = [
         "(box(point(min_lon, min_lat), point(max_lon, max_lat)))",
     ),
     ("idx_changeset_stats_uid", "CREATE INDEX idx_changeset_stats_uid ON changeset_stats USING BTREE (uid)"),
+    (
+        "idx_changeset_hashtag_lookup",
+        'CREATE INDEX idx_changeset_hashtag_lookup ON changeset_hashtag USING BTREE (hashtag COLLATE "C", created_at)',
+    ),
 ]
 _BULK_FKS = [
     ("changesets", "changesets_uid_fkey", "FOREIGN KEY (uid) REFERENCES users (uid)"),
@@ -22,6 +26,11 @@ _BULK_FKS = [
         "FOREIGN KEY (changeset_id) REFERENCES changesets (changeset_id)",
     ),
     ("changeset_stats", "changeset_stats_uid_fkey", "FOREIGN KEY (uid) REFERENCES users (uid)"),
+    (
+        "changeset_hashtag",
+        "changeset_hashtag_changeset_id_fkey",
+        "FOREIGN KEY (changeset_id) REFERENCES changesets (changeset_id) ON DELETE CASCADE",
+    ),
 ]
 
 
@@ -99,6 +108,18 @@ def _push_changesets(conn: duckdb.DuckDBPyConnection, where: str = "") -> None:
 
 def _push_changeset_stats(conn: duckdb.DuckDBPyConnection, where: str = "") -> None:
     conn.execute(f"INSERT INTO pg_target.changeset_stats SELECT * FROM changeset_stats {where} ON CONFLICT DO NOTHING")
+
+
+def _push_changeset_hashtags(conn: duckdb.DuckDBPyConnection, where: str = "") -> None:
+    # One lowercased (hashtag, changeset) row per tag, so the API can range-scan the hashtag prefix by
+    # index instead of scanning the whole recent tail. `where` filters on changeset_id, same set as changesets.
+    conn.execute(
+        f"""
+        INSERT INTO pg_target.changeset_hashtag (hashtag, changeset_id, created_at)
+        SELECT lower(h), changeset_id, created_at FROM changesets AS c, unnest(c.hashtags) AS h {where}
+        ON CONFLICT (hashtag, changeset_id) DO NOTHING
+        """
+    )
 
 
 def _push_chunked(conn: duckdb.DuckDBPyConnection, source: str, push) -> None:
@@ -187,6 +208,7 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
             conn.execute("INSERT INTO pg_target.users SELECT * FROM users ON CONFLICT DO NOTHING")
             _push_chunked(conn, "changesets", _push_changesets)
             _push_chunked(conn, "changeset_stats", _push_changeset_stats)
+            _push_chunked(conn, "changesets", _push_changeset_hashtags)
         elif _pg_has_history(conn):
             live_ids = "changeset_id IN (SELECT changeset_id FROM changeset_stats WHERE seq_id <> 0)"
             conn.execute(
@@ -195,10 +217,12 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
             )
             _push_changesets(conn, f"WHERE {live_ids}")
             _push_changeset_stats(conn, "WHERE seq_id <> 0")
+            _push_changeset_hashtags(conn, f"WHERE {live_ids}")
         else:
             conn.execute("INSERT INTO pg_target.users SELECT * FROM users ON CONFLICT DO NOTHING")
             _push_changesets(conn)
             _push_changeset_stats(conn)
+            _push_changeset_hashtags(conn)
 
         conn.execute(
             """
@@ -219,6 +243,7 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
             _pg(conn, "ANALYZE users")
             _pg(conn, "ANALYZE changesets")
             _pg(conn, "ANALYZE changeset_stats")
+            _pg(conn, "ANALYZE changeset_hashtag")
     finally:
         conn.execute("DETACH pg_target")
 

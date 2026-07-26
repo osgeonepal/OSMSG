@@ -7,7 +7,9 @@ from __future__ import annotations
 import datetime as dt
 
 import duckdb
+import pytest
 
+from osmsg import catalog
 from osmsg.catalog import hashtag_scope
 from osmsg.stats import COUNT_COLS, map_changes_sum, prefix_upper_bound
 
@@ -167,3 +169,35 @@ def test_history_side_ignores_recent_rollup_rows():
     sql, params = hashtag_scope("hc", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
     ids = con.execute(f"WITH m AS ({sql}) SELECT changeset_id FROM m ORDER BY changeset_id", params).fetchall()
     assert [r[0] for r in ids] == [1, 2, 3]
+
+
+def test_recent_pg_aggregates_shape_and_bounds():
+    # Each recent aggregate is a Postgres passthrough over the changeset_hashtag prefix index, with the
+    # frontier + window inlined and the endpoint's grain in the SELECT.
+    lo, hi = "#hotosm", prefix_upper_bound("#hotosm")
+    start = dt.datetime(2026, 7, 10, tzinfo=dt.UTC)
+    end = dt.datetime(2026, 7, 20, tzinfo=dt.UTC)
+    kw = dict(prefixes=[(lo, hi)], frontier=_FRONTIER, start=start, end=end)
+    user = catalog.recent_user_agg("pg", **kw)
+    for probe in ("postgres_query('pg'", "changeset_hashtag", 'COLLATE "C"', lo, hi, "2026-07-10", "2026-07-20"):
+        assert probe in user
+    assert "2026-07-01" in user  # frontier lower bound
+    assert "GROUP BY uid" in user
+    assert "creates" in catalog.recent_tag_agg("pg", **kw)
+    assert "editors" in catalog.recent_leaderboard_agg("pg", **kw)
+    assert "editor" in catalog.recent_editor_agg("pg", **kw)
+    assert "bucket" in catalog.recent_bucket_agg("pg", "day", **kw)
+    assert "lon" in catalog.recent_map_agg("pg", **kw)
+    assert "hashtag" in catalog.recent_hashtag_agg("pg", **kw)
+
+
+def test_recent_pg_aggregate_escapes_quotes():
+    # A hashtag carrying a quote must not break out of the inlined literal (PG + DuckDB double-escaping).
+    sql = catalog.recent_user_agg("pg", prefixes=[("#a'b", "#a'c")], frontier=_FRONTIER)
+    assert "a''''b" in sql and "a''''c" in sql
+    assert "#a'b'" not in sql  # no lone unescaped quote that would terminate the literal early
+
+
+def test_recent_pg_aggregate_requires_prefixes():
+    with pytest.raises(ValueError):
+        catalog.recent_user_agg("pg", prefixes=[], frontier=_FRONTIER)

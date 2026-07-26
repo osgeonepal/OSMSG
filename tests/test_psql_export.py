@@ -70,6 +70,7 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
         PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
         .replace("osmsg_tag[]", "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]")
         .replace("TEXT", "VARCHAR")
+        .replace(" ON DELETE CASCADE", "")  # DuckDB's parser rejects the action clause; Postgres needs it
     )
     conn = duckdb.connect(":memory:")
     conn.execute("INSTALL spatial")

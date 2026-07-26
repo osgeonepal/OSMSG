@@ -6,8 +6,11 @@ materialized recent rollup; the split frontier is re-read on a TTL so a newly pu
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import os
+import queue
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -16,6 +19,17 @@ import duckdb
 from osmsg import query
 from osmsg.history import fetch_manifest
 from osmsg.query import Sources
+
+_PG_ATTACH = "pg"
+
+# Warm connections (extensions + Postgres attached) reused across requests so cold-start is paid once;
+# the pool size caps concurrency, so heavy queries queue instead of thrashing the CPU.
+_POOL_SIZE = int(os.getenv("OSMSG_DUCKDB_POOL", "3"))
+# Above the slowest legitimate query; a watchdog interrupts anything past it so a disconnected client or
+# runaway cannot pin a core.
+_QUERY_TIMEOUT = float(os.getenv("OSMSG_QUERY_TIMEOUT_SECONDS", "150"))
+_pool: queue.Queue | None = None
+_pool_lock = threading.Lock()
 
 _HISTORY_URL = os.getenv("OSMSG_HISTORY_URL", "hf://datasets/kshitijrajsharma/osmsg-history")
 _ROLLUP = os.getenv("OSMSG_ROLLUP_BASE", f"{_HISTORY_URL}/rollup")
@@ -68,15 +82,51 @@ def _sources() -> Sources:
         recent_changesets_rel="pg.changesets",
         frontier=_frontier(),
         users_rel=f"read_parquet('{_USERS}')",
+        pg_attach=_PG_ATTACH,
     )
 
 
+def _pool_get() -> duckdb.DuckDBPyConnection:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                warm: queue.Queue = queue.Queue()
+                for _ in range(_POOL_SIZE):
+                    warm.put(_connect())
+                _pool = warm
+    return _pool.get()
+
+
 def _run(fn, hashtag, **kwargs):
-    con = _connect()
+    """Borrow a warm pooled connection (blocking past the pool size caps concurrency), run under a watchdog
+    that interrupts a query past _QUERY_TIMEOUT, and return it (replaced if it errored or was interrupted)."""
+    con = _pool_get()
+    done = threading.Event()
+
+    def _watchdog() -> None:
+        if not done.wait(_QUERY_TIMEOUT):
+            with contextlib.suppress(duckdb.Error):
+                con.interrupt()
+
+    watcher = threading.Thread(target=_watchdog, daemon=True)
+    watcher.start()
+    healthy = True
     try:
         return fn(con, hashtag, _sources(), **kwargs)
+    except duckdb.Error:
+        healthy = False  # interrupted or DB error -> the connection may be dirty, recycle it
+        raise
     finally:
-        con.close()
+        done.set()
+        watcher.join()  # ensure no interrupt is still pending before the connection is reused
+        assert _pool is not None
+        if healthy:
+            _pool.put(con)
+        else:
+            with contextlib.suppress(duckdb.Error):
+                con.close()
+            _pool.put(_connect())
 
 
 async def summary(hashtag: str | list[str], *, start: dt.datetime | None = None, end: dt.datetime | None = None):

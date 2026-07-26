@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS changeset_stats (
 );
 CREATE INDEX IF NOT EXISTS idx_changeset_stats_uid ON changeset_stats USING BTREE (uid);
 CREATE INDEX IF NOT EXISTS idx_changeset_stats_changeset_id ON changeset_stats USING BTREE (changeset_id);
+CREATE TABLE IF NOT EXISTS changeset_hashtag (
+    hashtag      TEXT NOT NULL,
+    changeset_id BIGINT NOT NULL REFERENCES changesets(changeset_id) ON DELETE CASCADE,
+    created_at   TIMESTAMPTZ,
+    PRIMARY KEY (hashtag, changeset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_changeset_hashtag_lookup ON changeset_hashtag
+    USING BTREE (hashtag COLLATE "C", created_at);
 CREATE TABLE IF NOT EXISTS state (
     source_url  TEXT PRIMARY KEY,
     last_seq    BIGINT NOT NULL,

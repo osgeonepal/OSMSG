@@ -7,9 +7,188 @@ from __future__ import annotations
 
 import datetime as dt
 
-from .stats import COUNT_COLS
+from .stats import COUNT_COLS, MAP_CHANGES_COLS
 
 _PROJECTION = f"changeset_id, uid, editor, created_at, {', '.join(COUNT_COLS)}, tags"
+
+
+def _pg_ts(value: dt.datetime) -> str:
+    return "TIMESTAMPTZ '" + value.astimezone(dt.UTC).strftime("%Y-%m-%d %H:%M:%S%z") + "'"
+
+
+def _pg_str(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _pg_query(attach: str, inner: str) -> str:
+    return f"postgres_query('{attach}', '{inner.replace(chr(39), chr(39) * 2)}')"
+
+
+# Recent side aggregated in Postgres via the changeset_hashtag prefix index; each returns an inlined
+# postgres_query relation (no bind params), DISTINCT-deduped so a multi-tag changeset counts once.
+
+_PSUM = ", ".join(f"sum(s.{c}) AS {c}" for c in COUNT_COLS)
+_OSUM = ", ".join(f"sum({c}) AS {c}" for c in COUNT_COLS)
+_MC = " + ".join(f"s.{c}" for c in MAP_CHANGES_COLS)
+
+
+def _pg_matched(prefixes, frontier, start, end, hashtag_table="changeset_hashtag", carry_created_at=False) -> str:
+    if not prefixes:
+        raise ValueError("prefixes must be non-empty")
+    ranges = " OR ".join(
+        f'(hashtag COLLATE "C" >= {_pg_str(lo)} AND hashtag COLLATE "C" < {_pg_str(hi)})' for lo, hi in prefixes
+    )
+    bounds = [f"created_at >= {_pg_ts(frontier)}"]
+    if start is not None:
+        bounds.append(f"created_at >= {_pg_ts(start)}")
+    if end is not None:
+        bounds.append(f"created_at < {_pg_ts(end)}")
+    where = f"({ranges}) AND {' AND '.join(bounds)}"
+    if carry_created_at:
+        # A changeset's rows all carry its created_at, so min() is that value: lets trends bucket without
+        # a second scan of `changesets` just for the timestamp.
+        return (
+            f"SELECT changeset_id, min(created_at) AS created_at "
+            f"FROM {hashtag_table} WHERE {where} GROUP BY changeset_id"
+        )
+    return f"SELECT DISTINCT changeset_id FROM {hashtag_table} WHERE {where}"
+
+
+def _pg_perchangeset(prefixes, frontier, start, end, extra: str = "") -> str:
+    """CTEs `m` (matched changeset ids) and `pc` (one row per changeset: uid, summed counts{extra}),
+    the shared basis every recent aggregate groups from."""
+    return (
+        f"WITH m AS ({_pg_matched(prefixes, frontier, start, end)}), "
+        f"pc AS (SELECT s.changeset_id, max(s.uid) AS uid{extra}, {_PSUM} "
+        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id)"
+    )
+
+
+def recent_user_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per-uid recent aggregate: changesets + summed counts. Powers summary and leaderboard."""
+    inner = (
+        f"{_pg_perchangeset(prefixes, frontier, start, end)} "
+        f"SELECT uid, count(*) AS changesets, {_OSUM} FROM pc GROUP BY uid"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_leaderboard_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per-uid recent aggregate with the distinct editors each user used, for the leaderboard rows."""
+    basis = _pg_perchangeset(prefixes, frontier, start, end, extra=", max(c.editor) AS editor")
+    basis = basis.replace(
+        "FROM m JOIN changeset_stats s USING (changeset_id)",
+        "FROM m JOIN changeset_stats s USING (changeset_id) JOIN changesets c USING (changeset_id)",
+    )
+    inner = (
+        f"{basis} SELECT uid, count(*) AS changesets, {_OSUM}, "
+        f"array_agg(DISTINCT editor) AS editors FROM pc GROUP BY uid"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_tag_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (key, value) recent tag breakdown: creates, modifies, length. Powers the tags endpoint."""
+    m = _pg_matched(prefixes, frontier, start, end)
+    inner = (
+        f"WITH m AS ({m}) "
+        f"SELECT (t).k AS k, (t).v AS v, sum((t).c) AS creates, sum((t).m) AS modifies, "
+        f"sum((t).len_m) AS length_m FROM m JOIN changeset_stats s USING (changeset_id), unnest(s.tags) AS t "
+        f"GROUP BY (t).k, (t).v"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_editor_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (editor, uid) recent aggregate: changesets (cs), map_changes. Powers the editors endpoint."""
+    basis = _pg_perchangeset(prefixes, frontier, start, end, extra=f", max(c.editor) AS editor, sum({_MC}) AS mc")
+    basis = basis.replace(
+        "FROM m JOIN changeset_stats s USING (changeset_id)",
+        "FROM m JOIN changeset_stats s USING (changeset_id) JOIN changesets c USING (changeset_id)",
+    )
+    inner = (
+        f"{basis} SELECT COALESCE(NULLIF(editor, ''), 'unknown') AS editor, uid, count(*) AS cs, "
+        f"sum(mc) AS map_changes FROM pc GROUP BY 1, uid"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_bucket_agg(attach, interval: str, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per time-bucket recent aggregate: changesets, distinct users, map_changes. Powers the trends
+    endpoint. `created_at` comes from `changeset_hashtag` (carried in the matched CTE), so this joins only
+    changeset_stats, no second scan of changesets. Buckets are disjoint across the frontier -> additive."""
+    m = _pg_matched(prefixes, frontier, start, end, carry_created_at=True)
+    inner = (
+        f"WITH m AS ({m}), "
+        f"pc AS (SELECT s.changeset_id, max(s.uid) AS uid, m.created_at AS created_at, sum({_MC}) AS mc "
+        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id, m.created_at) "
+        f"SELECT to_char(date_trunc({_pg_str(interval)}, created_at), 'YYYY-MM-DD') AS bucket, "
+        f"count(*) AS changesets, count(DISTINCT uid) AS users, sum(mc) AS map_changes FROM pc GROUP BY 1"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_hashtag_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (hashtag, uid) recent aggregate: changesets, map_changes. Powers the trending-hashtags endpoint
+    (each matched hashtag attributes each of its changesets, so the sums are per hashtag, not deduped)."""
+    m = _pg_matched(prefixes, frontier, start, end)
+    ranges = " OR ".join(
+        f'(ch.hashtag COLLATE "C" >= {_pg_str(lo)} AND ch.hashtag COLLATE "C" < {_pg_str(hi)})' for lo, hi in prefixes
+    )
+    inner = (
+        f"WITH m AS ({m}), pc AS (SELECT s.changeset_id, max(s.uid) AS uid, sum({_MC}) AS mc "
+        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id) "
+        f"SELECT ch.hashtag AS hashtag, pc.uid AS uid, count(*) AS changesets, sum(pc.mc) AS mc "
+        f"FROM pc JOIN changeset_hashtag ch USING (changeset_id) WHERE {ranges} GROUP BY ch.hashtag, pc.uid"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_map_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per-changeset recent centroids (changeset_id, uid, lon, lat) from the bbox midpoint. Powers the map."""
+    m = _pg_matched(prefixes, frontier, start, end)
+    inner = (
+        f"WITH m AS ({m}) SELECT c.changeset_id, c.uid, (c.min_lon + c.max_lon) / 2.0 AS lon, "
+        f"(c.min_lat + c.max_lat) / 2.0 AS lat FROM m JOIN changesets c USING (changeset_id) "
+        f"WHERE c.min_lon IS NOT NULL"
+    )
+    return _pg_query(attach, inner)
+
+
+def _pg_user_window(frontier, start, end) -> str:
+    bounds = [f"c.created_at >= {_pg_ts(frontier)}"]
+    if start is not None:
+        bounds.append(f"c.created_at >= {_pg_ts(start)}")
+    if end is not None:
+        bounds.append(f"c.created_at < {_pg_ts(end)}")
+    return " AND ".join(bounds)
+
+
+def recent_user_tags(attach, uids: list[int], *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (uid, key, value) recent tag breakdown for a fixed set of uids. Driven from the changeset_stats
+    uid index (only those users' changesets), so it stays cheap regardless of the hashtag's total size."""
+    uid_list = ", ".join(str(int(u)) for u in uids)
+    ranges = " OR ".join(f"(lower(h) >= {_pg_str(lo)} AND lower(h) < {_pg_str(hi)})" for lo, hi in prefixes)
+    inner = (
+        f"SELECT s.uid AS uid, (t).k AS k, (t).v AS v, sum((t).c) AS c, sum((t).m) AS m, sum((t).len_m) AS len_m "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(s.tags) AS t "
+        f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} "
+        f"AND EXISTS (SELECT 1 FROM unnest(c.hashtags) AS h WHERE {ranges}) GROUP BY s.uid, (t).k, (t).v"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_user_hashtags(attach, uids: list[int], *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (uid, hashtag) recent membership for a fixed set of uids, driven from the changeset_stats uid
+    index; returns each matching hashtag the user contributed under in the window."""
+    uid_list = ", ".join(str(int(u)) for u in uids)
+    ranges = " OR ".join(f"(lower(h) >= {_pg_str(lo)} AND lower(h) < {_pg_str(hi)})" for lo, hi in prefixes)
+    inner = (
+        f"SELECT DISTINCT s.uid AS uid, h AS hashtag "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
+        f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} AND ({ranges})"
+    )
+    return _pg_query(attach, inner)
 
 
 def _window_clause(start: dt.datetime | None, end: dt.datetime | None) -> tuple[str, list[object]]:
@@ -72,9 +251,8 @@ def hashtag_scope(
     end: dt.datetime | None = None,
 ) -> tuple[str, list[object]]:
     """One deduped per-changeset relation for hashtag prefix ranges [lo, hi): the rollup for history
-    (< frontier) unioned with the recent tail from the base (>= frontier), deduped by changeset_id so a
-    changeset matching several prefixes counts once. Optional [start, end) window bounds created_at.
-    Returns (sql, params)."""
+    (< frontier) unioned with the recent tail (>= frontier), deduped by changeset_id, optional [start,
+    end) window. Returns (sql, params)."""
     if not prefixes:
         raise ValueError("prefixes must be non-empty")
     window_sql, window_params = _window_clause(start, end)

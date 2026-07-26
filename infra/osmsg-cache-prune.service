@@ -1,6 +1,8 @@
 [Unit]
-Description=Prune osmsg replication cache older than 7 days
+Description=Prune osmsg replication cache older than 1 day
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/find /mnt/mnt/osmsg/cache -type f -mtime +7 -delete
+# Diffs are consumed once (resume state lives in DuckDB, not the filesystem), and DuckDB spill temp is
+# transient, so a day's retention is ample. A longer window let changefiles grow to tens of GB.
+ExecStart=/usr/bin/find /mnt/mnt/osmsg/cache -type f -mtime +1 -delete
