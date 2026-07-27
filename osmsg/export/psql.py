@@ -116,7 +116,7 @@ def _push_changeset_hashtags(conn: duckdb.DuckDBPyConnection, where: str = "") -
     conn.execute(
         f"""
         INSERT INTO pg_target.changeset_hashtag (hashtag, changeset_id, created_at)
-        SELECT lower(h), changeset_id, created_at FROM changesets AS c, unnest(c.hashtags) AS h {where}
+        SELECT lower(h), changeset_id, created_at FROM changesets AS c, unnest(c.hashtags) AS t(h) {where}
         ON CONFLICT (hashtag, changeset_id) DO NOTHING
         """
     )

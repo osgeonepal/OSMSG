@@ -268,14 +268,21 @@ def leaderboard(
     page_size = max(1, min(page_size, MAX_PAGE_SIZE))
     prefixes = _prefixes(hashtag)
     hsql, hp = _history(s, prefixes, start, end)
-    # Materialize the deduped history once; _q_lb and the per-user tag attach both read it (avoids
-    # re-scanning the rollup three times for a mega-hashtag page).
-    con.execute(f"CREATE OR REPLACE TEMP TABLE _hist_cs AS SELECT * FROM ({hsql})", hp)
-    rrel, rp = _recent_leaderboard(s, prefixes, start, end)
-    con.execute(
-        f"CREATE OR REPLACE TEMP TABLE _q_lb AS "
-        f"SELECT uid, count(*) AS changesets, {_SUM_AS}, list(DISTINCT editor) AS editors FROM _hist_cs GROUP BY uid"
+    count_sql, count_params = catalog.history_scope_count(
+        s.history_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
     )
+    count_row = con.execute(count_sql, count_params).fetchone()
+    small_history = (count_row[0] if count_row else 0) <= _MAX_TAG_ROWS
+    _q_lb_agg = f"SELECT uid, count(*) AS changesets, {_SUM_AS}, list(DISTINCT editor) AS editors"
+    if small_history:
+        # Small history: materialize once and reuse it for the per-user tag attach.
+        con.execute(f"CREATE OR REPLACE TEMP TABLE _hist_cs AS SELECT * FROM ({hsql})", hp)
+        con.execute(f"CREATE OR REPLACE TEMP TABLE _q_lb AS {_q_lb_agg} FROM _hist_cs GROUP BY uid")
+    else:
+        # Mega history: stream the dedup straight into the per-user aggregate; materializing the wide
+        # multi-million-row history would blow up.
+        con.execute(f"CREATE OR REPLACE TEMP TABLE _q_lb AS {_q_lb_agg} FROM ({hsql}) GROUP BY uid", hp)
+    rrel, rp = _recent_leaderboard(s, prefixes, start, end)
     search_pred, search_params = "", []
     if q:
         search_pred = " WHERE lower(name) LIKE ?"
@@ -311,12 +318,7 @@ def leaderboard(
     )
     for i, r in enumerate(rows):
         r["rank"] = offset + i + 1
-    count_sql, count_params = catalog.history_scope_count(
-        s.history_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
-    )
-    count_row = con.execute(count_sql, count_params).fetchone()
-    history_rows = count_row[0] if count_row else 0
-    if history_rows <= _MAX_TAG_ROWS:
+    if small_history:
         _attach_user_tags(con, rows, s, prefixes, start, end, hist_rel="_hist_cs")
     else:
         for r in rows:
@@ -504,23 +506,26 @@ def map_points(
     end: dt.datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Changeset centroids `(changeset_id, uid, lon, lat)` for the hashtag union, up to `limit`, for a
-    map. Optional [start, end) window. History centroids come from the rollup, recent from the base
-    changesets bbox; the rollup must carry `lon`/`lat` (published rollups built after the map change do)."""
+    map. Optional [start, end) window. Recent centroids come from the base changesets bbox; history
+    centroids come from the rollup only when it carries `lon`/`lat` (older published rollups do not)."""
     prefixes = _prefixes(hashtag)
     if s.pg_attach:
-        window_sql, window_params = catalog._window_clause(start, end)
-        prefix_params = [bound for pair in prefixes for bound in pair]
-        hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
-        hist = (
-            f"SELECT changeset_id, uid, lon, lat FROM {s.history_rel} "
-            f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND lon IS NOT NULL"
-        )
         rrel = catalog.recent_map_agg(s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
-        sql = (
-            f"SELECT DISTINCT ON (changeset_id) changeset_id, uid, lon, lat "
-            f"FROM ({hist} UNION ALL SELECT changeset_id, uid, lon, lat FROM {rrel})"
-        )
-        res = con.execute(f"{sql} LIMIT ?", [*prefix_params, s.frontier, *window_params, limit])
+        recent_sel = f"SELECT changeset_id, uid, lon, lat FROM {rrel}"
+        history_cols = {d[0] for d in con.execute(f"SELECT * FROM {s.history_rel} LIMIT 0").description}
+        if "lon" in history_cols and "lat" in history_cols:
+            window_sql, window_params = catalog._window_clause(start, end)
+            prefix_params = [bound for pair in prefixes for bound in pair]
+            hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+            hist = (
+                f"SELECT changeset_id, uid, lon, lat FROM {s.history_rel} "
+                f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND lon IS NOT NULL"
+            )
+            sql = f"SELECT DISTINCT ON (changeset_id) changeset_id, uid, lon, lat FROM ({hist} UNION ALL {recent_sel})"
+            res = con.execute(f"{sql} LIMIT ?", [*prefix_params, s.frontier, *window_params, limit])
+        else:
+            sql = f"SELECT DISTINCT ON (changeset_id) changeset_id, uid, lon, lat FROM ({recent_sel})"
+            res = con.execute(f"{sql} LIMIT ?", [limit])
         return _rows(res)
     sql, params = map_scope(
         s.history_rel, s.recent_changesets_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
