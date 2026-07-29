@@ -124,7 +124,7 @@ def test_convert_attribution_tags_window(tmp_path):
     def tagset(tags):
         return {(t["k"], t["v"], t["c"], t["m"]) for t in (tags or [])}
 
-    # tags is the native LIST<STRUCT(k,v,c,m,len_m)>, not JSON.
+    # tags is the native LIST<STRUCT(k,v,c,m,l)>, not JSON.
     assert tagset(cf[100][6]) == {("building", "yes", 1, 0), ("highway", "residential", 1, 0)}
     assert tagset(cf[200][6]) == {("building", "house", 0, 1)}
     assert tagset(cf[300][6]) == set()
@@ -144,3 +144,42 @@ def test_convert_attribution_tags_window(tmp_path):
     assert db.execute("SELECT count(*) FROM changeset_stats").fetchone()[0] == 3
     assert db.execute("SELECT count(*) FROM changesets").fetchone()[0] == 3
     assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 2
+
+
+def _build_length_history(path: str) -> None:
+    """An open 3-node way created in-window; node 1 also has a later version at a very different place, so
+    the length must use the FIRST version's coords (osmium's first-write-wins), not the latest."""
+    writer = osmium.SimpleWriter(path)
+    writer.add_node(mut.Node(id=1, version=1, visible=True, timestamp="2022-03-01T00:00:00Z",
+                             changeset=100, uid=1, user="a", location=(10.0, 20.0)))
+    writer.add_node(mut.Node(id=1, version=2, visible=True, timestamp="2023-03-01T00:00:00Z",
+                             changeset=200, uid=1, user="a", location=(15.0, 25.0)))  # moved far; must be ignored
+    writer.add_node(mut.Node(id=2, version=1, visible=True, timestamp="2022-03-01T00:00:00Z",
+                             changeset=100, uid=1, user="a", location=(10.001, 20.0)))
+    writer.add_node(mut.Node(id=3, version=1, visible=True, timestamp="2022-03-01T00:00:00Z",
+                             changeset=100, uid=1, user="a", location=(10.002, 20.001)))
+    writer.add_way(mut.Way(id=10, version=1, visible=True, timestamp="2022-03-01T01:00:00Z",
+                           changeset=100, uid=1, user="a", tags={"highway": "track"}, nodes=[1, 2, 3]))
+    writer.close()
+
+
+def test_convert_length_matches_osmium(tmp_path):
+    import osmium.geom
+
+    osh = str(tmp_path / "len.osh.pbf")
+    _build_length_history(osh)
+    pathlib.Path(tmp_path / "cs.osm").write_text(CHANGESET_DUMP)
+    out = convert(osh, str(tmp_path / "cs.osm"),
+                  dt.datetime(2021, 1, 1, tzinfo=UTC), dt.datetime(2025, 1, 1, tzinfo=UTC), tmp_path)
+
+    # ground truth: osmium's own haversine over the FIRST-version coords, summed per segment
+    c = osmium.geom.Coordinates
+    hav = osmium.geom.haversine_distance
+    expected = hav(c(10.0, 20.0), c(10.001, 20.0)) + hav(c(10.001, 20.0), c(10.002, 20.001))
+
+    db = duckdb.connect(str(out / "stats.duckdb"), read_only=True)
+    (length,) = db.execute(
+        "SELECT t.l FROM changeset_stats, UNNEST(tags) AS u(t) WHERE t.k='highway' AND t.v='track'"
+    ).fetchone()
+    assert length is not None
+    assert abs(length - expected) < 1e-6, f"join length {length} != osmium {expected}"

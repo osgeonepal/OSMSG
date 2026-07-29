@@ -12,6 +12,7 @@ from shapely import wkt as shapely_wkt
 from shapely.geometry import box
 
 from .models import Action, Changeset, ChangesetStats, TagValueStat, User
+from .stats import MAX_WAY_LENGTH_M
 
 HASHTAG_RE = re.compile(r"#[\w-]+")
 
@@ -131,16 +132,21 @@ class ChangefileHandler(osmium.SimpleHandler):
         if cs_id not in self.stubs:
             self.stubs[cs_id] = Changeset(changeset_id=cs_id, uid=uid)
 
+    @staticmethod
+    def _way_length(way_nodes) -> float:
+        """Haversine metres of an OPEN way (first ref != last ref); 0 for a closed way (an area, not a
+        length) or when geometry is unavailable. In the live per-diff path a node from an earlier diff
+        has no location here (InvalidLocationError) -> 0; the backfill's global index measures those."""
+        if not way_nodes or len(way_nodes) < 2 or way_nodes[0].ref == way_nodes[-1].ref:
+            return 0.0
+        try:
+            length = osmium.geom.haversine_distance(way_nodes)
+        except osmium.InvalidLocationError:
+            return 0.0
+        return length if length <= MAX_WAY_LENGTH_M else 0.0
+
     def _accumulate(self, uid, uname, cs_id, version, tags, kind, way_nodes=None) -> None:
         action = Action.DELETE if version == 0 else Action.CREATE if version == 1 else Action.MODIFY
-
-        len_m = 0.0
-        cfg = self.config
-        if cfg["length"] and way_nodes:
-            try:
-                len_m = osmium.geom.haversine_distance(way_nodes)
-            except Exception:
-                len_m = 0.0
 
         self._record(uid, uname, cs_id)
         stats = self.stats.setdefault(cs_id, ChangesetStats(changeset_id=cs_id, uid=uid, seq_id=self.seq_id))
@@ -160,15 +166,16 @@ class ChangefileHandler(osmium.SimpleHandler):
         if not tags or action is Action.DELETE:
             return
 
-        length_keys = cfg["length"] or ()
-        track_length = len_m > 0 and action is Action.CREATE
+        # Way length attaches to every tag of an open way on create; closed ways are areas, not lengths.
+        length_m = self._way_length(way_nodes) if action is Action.CREATE else 0.0
+        cfg = self.config
 
         if cfg["tag_mode"] != "none":
             for k, v in tags:
                 tv = stats.tag_stats.setdefault(k, {}).setdefault(v, TagValueStat())
                 tv.add(action)
-                if track_length and k in length_keys:
-                    tv.add_length(len_m)
+                if length_m:
+                    tv.add_length(length_m)
         elif cfg["additional_tags"]:
             for k in cfg["additional_tags"]:
                 if k not in tags:
@@ -176,8 +183,8 @@ class ChangefileHandler(osmium.SimpleHandler):
                 v = tags[k]
                 tv = stats.tag_stats.setdefault(k, {}).setdefault(v, TagValueStat())
                 tv.add(action)
-                if track_length and k in length_keys:
-                    tv.add_length(len_m)
+                if length_m:
+                    tv.add_length(length_m)
 
     def _in_window(self, ts) -> bool:
         # Lower-bound only; disjoint coverage between ticks comes from the seq boundary
@@ -196,8 +203,7 @@ class ChangefileHandler(osmium.SimpleHandler):
             return
         if not self._should_collect(w.user, w.changeset):
             return
-        nodes = w.nodes if self.config["length"] else None
-        self._accumulate(w.uid, w.user, w.changeset, 0 if w.deleted else w.version, w.tags, "ways", nodes)
+        self._accumulate(w.uid, w.user, w.changeset, 0 if w.deleted else w.version, w.tags, "ways", w.nodes)
 
     def relation(self, r) -> None:
         if not self._in_window(r.timestamp):

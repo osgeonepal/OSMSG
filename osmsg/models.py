@@ -108,9 +108,9 @@ class ChangesetStats(BaseModel):
         return self.nodes.total + self.ways.total + self.rels.total
 
     def tags_list(self) -> list[dict[str, Any]]:
-        """Flat native tag rows ({k,v,c,m,len_m}) for the shard's LIST<STRUCT> column, so ingest is a copy."""
+        """Flat native tag rows ({k,v,c,m,l}) for the shard's LIST<STRUCT> column, so ingest is a copy."""
         return [
-            {"k": key, "v": value, "c": tv.c, "m": tv.m, "len_m": round(tv.len, 2) if tv.len is not None else None}
+            {"k": key, "v": value, "c": tv.c, "m": tv.m, "l": round(tv.len, 2) if tv.len is not None else None}
             for key, by_value in self.tag_stats.items()
             for value, tv in by_value.items()
         ]

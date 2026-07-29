@@ -11,7 +11,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 # Native shard column for the per-changeset tag breakdown, matching the store's
-# STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[] so ingest is a direct copy.
+# STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[] so ingest is a direct copy.
 _TAG_PA_TYPE = pa.list_(
     pa.struct(
         [
@@ -19,7 +19,7 @@ _TAG_PA_TYPE = pa.list_(
             pa.field("v", pa.string()),
             pa.field("c", pa.int64()),
             pa.field("m", pa.int64()),
-            pa.field("len_m", pa.float64()),
+            pa.field("l", pa.float64()),
         ]
     )
 )

@@ -21,7 +21,6 @@ Under `hf://datasets/kshitijrajsharma/osmsg-history`:
 | `changefiles` | per-changeset counts + native `tags` + `created_at` + centroid | the source of truth for counts |
 | `changesets` | per-changeset uid/username/editor/hashtags + centroid | the source of truth for metadata |
 | `rollup/hashtag_changeset` | one row per (hashtag, changeset), full breakdown + native `tags` | any hashtag query, exact |
-| `rollup/alltime_user` | one row per uid | the all-time leaderboard with no hashtag |
 | `rollup/users` | uid to username | display names, joined at read time |
 
 `manifest.json` records `min_month` and `max_month`. The frontier is the first instant after
@@ -31,7 +30,7 @@ Under `hf://datasets/kshitijrajsharma/osmsg-history`:
 
 One row per `(hashtag, changeset_id)`, sorted by lowercased hashtag so a prefix range prunes row
 groups. Columns: `hashtag`, `changeset_id`, `uid`, `editor`, `created_at`, the eleven count columns
-(`nodes_created` … `poi_modified`), and `tags`. `tags` is a native `LIST<STRUCT(k, v, c, m, len_m)>`
+(`nodes_created` … `poi_modified`), and `tags`. `tags` is a native `LIST<STRUCT(k, v, c, m, l)>` (`l` is way length in metres)
 (pre-exploded tag stats), so the tag breakdown reads a column instead of parsing JSON per query.
 
 Keeping `changeset_id` makes any prefix exact: a query dedups by `changeset_id`, so a changeset that
@@ -99,8 +98,8 @@ and refines from day to hour to minute as it catches up.
 ## Building and publishing
 
 `osmsg maintain month <YYYY-MM>` builds a finished month: it runs osmsg over the month from day diffs,
-exports the `changefiles` and `changesets` partitions, refreshes `hashtag_changeset`, `alltime_user`,
-and `users`, and uploads them. It refuses a month that stopped short of its boundary, so published
+exports the `changefiles` and `changesets` partitions, refreshes `hashtag_changeset` and `users`,
+and uploads them. It refuses a month that stopped short of its boundary, so published
 months are complete. Re-running a month rebuilds and overwrites it.
 
 ## Consistency

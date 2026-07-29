@@ -63,10 +63,10 @@ def test_changeset_stats_to_row_flattens_buckets_and_emits_native_tags():
     assert row[7] == 2  # ways_modified
     assert row[12] == 3  # poi_created
 
-    # The shard column is a native list of {k, v, c, m, len_m} rows, not a JSON string.
+    # The shard column is a native list of {k, v, c, m, l} rows, not a JSON string.
     assert row[14] == [
-        {"k": "building", "v": "yes", "c": 2, "m": 1, "len_m": None},
-        {"k": "highway", "v": "residential", "c": 1, "m": 0, "len_m": 120.0},
+        {"k": "building", "v": "yes", "c": 2, "m": 1, "l": None},
+        {"k": "highway", "v": "residential", "c": 1, "m": 0, "l": 120.0},
     ]
 
 

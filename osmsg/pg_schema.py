@@ -2,7 +2,7 @@
 # depends on. Created before the schema, only when absent (PG_TAG_TYPE_EXISTS_SQL): a plain CREATE TYPE
 # is a recognized write both under asyncpg and DuckDB's postgres_execute, unlike a DO/plpgsql block.
 PG_TAG_TYPE_EXISTS_SQL = "SELECT 1 FROM pg_type WHERE typname = 'osmsg_tag'"
-PG_TAG_TYPE_SQL = "CREATE TYPE osmsg_tag AS (k text, v text, c bigint, m bigint, len_m double precision)"
+PG_TAG_TYPE_SQL = "CREATE TYPE osmsg_tag AS (k text, v text, c bigint, m bigint, l double precision)"
 
 PG_SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (

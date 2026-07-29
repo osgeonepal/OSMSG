@@ -31,6 +31,7 @@ _QUERY_TIMEOUT = float(os.getenv("OSMSG_QUERY_TIMEOUT_SECONDS", "150"))
 _pool: queue.Queue | None = None
 _pool_lock = threading.Lock()
 
+_QUERY_CACHE_DIR = os.getenv("OSMSG_QUERY_CACHE_DIR")  # memoize all-time mega aggregates here; unset -> off
 _HISTORY_URL = os.getenv("OSMSG_HISTORY_URL", "hf://datasets/kshitijrajsharma/osmsg-history")
 _ROLLUP = os.getenv("OSMSG_ROLLUP_BASE", f"{_HISTORY_URL}/rollup")
 _HASHTAG_CHANGESET = os.getenv("OSMSG_HASHTAG_CHANGESET", f"{_ROLLUP}/hashtag_changeset/data.parquet")
@@ -83,6 +84,7 @@ def _sources() -> Sources:
         frontier=_frontier(),
         users_rel=f"read_parquet('{_USERS}')",
         pg_attach=_PG_ATTACH,
+        cache_dir=_QUERY_CACHE_DIR,
     )
 
 

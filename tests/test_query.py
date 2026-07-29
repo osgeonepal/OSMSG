@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 
 import duckdb
@@ -18,10 +19,10 @@ def con():
     cols = ", ".join(f"{col} BIGINT" for col in COUNT_COLS)
     hist_ddl = (
         f"hashtag VARCHAR, changeset_id BIGINT, uid BIGINT, editor VARCHAR, created_at TIMESTAMP, "
-        f"{cols}, tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]"
+        f"{cols}, tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[]"
     )
     zeros = ", ".join(["0"] * len(COUNT_COLS))
-    b = "[{'k':'building','v':'yes','c':%d,'m':%d,'len_m':NULL}]"
+    b = "[{'k':'building','v':'yes','c':%d,'m':%d,'l':NULL}]"
     # history is the published rollup (native tags list); recent is the live base tables.
     c.execute(f"CREATE TABLE history ({hist_ddl})")
     c.execute(
@@ -31,11 +32,11 @@ def con():
     )
     c.execute(
         f"CREATE TABLE cs_stats (changeset_id BIGINT, seq_id BIGINT, uid BIGINT, {cols}, "
-        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[])"
+        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[])"
     )
     c.execute(
         f"""INSERT INTO cs_stats VALUES
-        (3, 0, 1, {zeros.replace("0", "5", 1)}, [{{'k':'building','v':'yes','c':1,'m':2,'len_m':NULL}}])"""
+        (3, 0, 1, {zeros.replace("0", "5", 1)}, [{{'k':'building','v':'yes','c':1,'m':2,'l':NULL}}])"""
     )
     c.execute(
         "CREATE TABLE csets (changeset_id BIGINT, uid BIGINT, editor VARCHAR, created_at TIMESTAMP, hashtags VARCHAR[])"
@@ -126,3 +127,41 @@ def test_tags_breakdown(con, sources):
 def test_exact_hashtag_no_prefix_bleed(con, sources):
     # An exact non-hotosm hashtag returns nothing from this fixture.
     assert query.summary(con, "missingmaps", sources)["changesets"] == 0
+
+
+def test_cache_hit_equals_miss(con, sources, tmp_path):
+    """The all-time cache is pure memoization: miss (computes + writes) and hit (reads) both equal the
+    uncached result. This is the guarantee that caching never changes the numbers."""
+    baseline = query.summary(con, "hotosm", sources)
+    cached = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    miss = query.summary(con, "hotosm", cached)
+    assert len(list(tmp_path.glob("summary_users-*.parquet"))) == 1
+    hit = query.summary(con, "hotosm", cached)
+    assert baseline == miss == hit
+
+
+def test_cache_skips_windowed_queries(con, sources, tmp_path):
+    cached = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    query.summary(con, "hotosm", cached, start=dt.datetime(2026, 1, 1, tzinfo=dt.UTC))
+    assert list(tmp_path.glob("*.parquet")) == []
+
+
+def test_cache_frontier_advance_uses_new_file(con, sources, tmp_path):
+    cached = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    query.summary(con, "hotosm", cached)
+    query.summary(con, "hotosm", dataclasses.replace(cached, frontier=dt.datetime(2026, 8, 1, tzinfo=dt.UTC)))
+    assert len(list(tmp_path.glob("summary_users-*.parquet"))) == 2
+
+
+def test_recent_tail_cache_noop_without_postgres(con, sources, tmp_path):
+    """The recent-tail slice cache only engages for an all-time query over attached Postgres with a cache
+    dir; otherwise the sources are returned unchanged so the recent side stays live."""
+    prefixes = query._prefixes("hotosm")
+    # No pg_attach -> unchanged even with a cache dir.
+    local = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    assert query._with_recent_tail_cache(con, local, prefixes, None, None) is local
+    # pg_attach + cache dir but a window -> unchanged (recent stays live for windowed queries).
+    pg = dataclasses.replace(sources, cache_dir=str(tmp_path), pg_attach="pg")
+    windowed = query._with_recent_tail_cache(con, pg, prefixes, dt.datetime(2026, 1, 1, tzinfo=dt.UTC), None)
+    assert windowed is pg
+    assert list(tmp_path.glob("recent_*.parquet")) == []

@@ -35,7 +35,7 @@ def test_pg_schema_uses_native_tag_type():
 
     assert "tags           osmsg_tag[]" in PG_SCHEMA
     assert "JSONB" not in PG_SCHEMA
-    assert "CREATE TYPE osmsg_tag AS (k text, v text, c bigint, m bigint, len_m double precision)" in PG_TAG_TYPE_SQL
+    assert "CREATE TYPE osmsg_tag AS (k text, v text, c bigint, m bigint, l double precision)" in PG_TAG_TYPE_SQL
 
 
 def test_pg_schema_state_is_single_row_per_source():
@@ -68,7 +68,7 @@ def test_pg_schema_statements_each_parse_with_postgres_extension():
     approximation (DuckDB's CREATE TABLE syntax is compatible)."""
     duckdb_clone = (
         PG_SCHEMA.replace("DOUBLE PRECISION", "DOUBLE")
-        .replace("osmsg_tag[]", "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]")
+        .replace("osmsg_tag[]", "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[]")
         .replace("TEXT", "VARCHAR")
         .replace(" ON DELETE CASCADE", "")  # DuckDB's parser rejects the action clause; Postgres needs it
     )
@@ -196,7 +196,7 @@ def test_merge_parquet_changeset_stats_native_tags(fresh_db, tmp_path):
             0,
             0,
             0,
-            [{"k": "building", "v": "yes", "c": i, "m": 0, "len_m": None}] if i % 2 == 0 else [],
+            [{"k": "building", "v": "yes", "c": i, "m": 0, "l": None}] if i % 2 == 0 else [],
         )
         for i in range(n)
     ]
@@ -262,7 +262,7 @@ def test_merge_parquet_upgrades_empty_changeset_when_richer_data_arrives(fresh_d
                 0,
                 5,
                 0,
-                [{"k": "building", "v": "yes", "c": 3, "m": 0, "len_m": None}],
+                [{"k": "building", "v": "yes", "c": 3, "m": 0, "l": None}],
             )
         ],
     )
@@ -399,7 +399,7 @@ def test_to_psql_upgrades_empty_changeset_when_pushed_again(fresh_db, tmp_path):
                 0,
                 5,
                 0,
-                [{"k": "shop", "v": "bakery", "c": 1, "m": 0, "len_m": None}],
+                [{"k": "shop", "v": "bakery", "c": 1, "m": 0, "l": None}],
             ),  # noqa: E501
         ],
     )

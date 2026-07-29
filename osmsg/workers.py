@@ -76,10 +76,8 @@ def process_changefile(url: str, sequence_id: int) -> None:
 
     handler = ChangefileHandler(cfg, sequence_id, _VALID_CHANGESETS)
     try:
-        if cfg["length"]:
-            handler.apply_file(str(raw_path), locations=True)
-        else:
-            handler.apply_file(str(raw_path))
+        # locations=True so open ways can be measured (haversine needs node coords); length is always on.
+        handler.apply_file(str(raw_path), locations=True)
     except Exception as exc:
         _warn(f"changefile may be corrupt ({url}): {exc}")
 

@@ -16,12 +16,12 @@ def store():
     cols = ", ".join(f"{c} BIGINT" for c in COUNT_COLS)
     con.execute(
         f"CREATE TABLE changeset_stats (changeset_id BIGINT, seq_id BIGINT, uid BIGINT, {cols}, "
-        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[])"
+        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[])"
     )
-    b1 = "[{'k':'building','v':'yes','c':2,'m':1,'len_m':NULL}]"
+    b1 = "[{'k':'building','v':'yes','c':2,'m':1,'l':NULL}]"
     b2 = (
-        "[{'k':'building','v':'yes','c':3,'m':0,'len_m':NULL},"
-        "{'k':'highway','v':'residential','c':1,'m':0,'len_m':NULL}]"
+        "[{'k':'building','v':'yes','c':3,'m':0,'l':NULL},"
+        "{'k':'highway','v':'residential','c':1,'m':0,'l':NULL}]"
     )
     # changeset 1: TWO seq rows (long-open changeset across diffs) -> must sum + merge tags.
     con.execute(

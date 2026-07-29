@@ -58,15 +58,15 @@ def test_map_changes_expr_is_nine_terms():
 
 
 def test_tag_breakdown_from_native_list(stats_conn):
-    # tag_breakdown_from_list aggregates the native LIST<STRUCT(k,v,c,m,len_m)> tags column.
+    # tag_breakdown_from_list aggregates the native LIST<STRUCT(k,v,c,m,l)> tags column.
     from osmsg.stats import TAG_STRUCT_DDL, tag_breakdown_from_list
 
     stats_conn.execute(f"CREATE TABLE tl (changeset_id BIGINT, tags {TAG_STRUCT_DDL}[])")
     stats_conn.execute(
         """INSERT INTO tl VALUES
-        (1, [{'k':'building','v':'yes','c':5,'m':2,'len_m':NULL}]),
-        (2, [{'k':'building','v':'yes','c':3,'m':1,'len_m':NULL},
-             {'k':'highway','v':'residential','c':1,'m':0,'len_m':NULL}])"""
+        (1, [{'k':'building','v':'yes','c':5,'m':2,'l':NULL}]),
+        (2, [{'k':'building','v':'yes','c':3,'m':1,'l':NULL},
+             {'k':'highway','v':'residential','c':1,'m':0,'l':NULL}])"""
     )
     rows = {(r[0], r[1]): (r[2], r[3]) for r in stats_conn.execute(tag_breakdown_from_list("tl")).fetchall()}
     assert rows[("building", "yes")] == (8, 3)

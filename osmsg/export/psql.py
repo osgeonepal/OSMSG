@@ -122,16 +122,20 @@ def _push_changeset_hashtags(conn: duckdb.DuckDBPyConnection, where: str = "") -
     )
 
 
-def _push_chunked(conn: duckdb.DuckDBPyConnection, source: str, push) -> None:
-    """Call push() once per changeset_id range so each range commits on its own."""
-    bounds = conn.execute(f"SELECT min(changeset_id), max(changeset_id) FROM {source}").fetchone()
+def _push_chunked(conn: duckdb.DuckDBPyConnection, source: str, push, extra: str = "") -> None:
+    """Call push() once per changeset_id range so each range commits on its own, keeping peak memory to
+    one chunk. `extra` is an extra predicate (no WHERE) ANDed into both the bounds probe and every chunk,
+    so an incremental push chunks only the rows it will actually push."""
+    where_extra = f" WHERE {extra}" if extra else ""
+    bounds = conn.execute(f"SELECT min(changeset_id), max(changeset_id) FROM {source}{where_extra}").fetchone()
     if not bounds or bounds[0] is None:
         return
     lo, hi = bounds
     step = (hi - lo) // _BULK_COMMIT_CHUNKS + 1
     cursor = lo
     while cursor <= hi:
-        push(conn, f"WHERE changeset_id >= {cursor} AND changeset_id < {cursor + step}")
+        rng = f"changeset_id >= {cursor} AND changeset_id < {cursor + step}"
+        push(conn, f"WHERE {rng} AND {extra}" if extra else f"WHERE {rng}")
         cursor += step
 
 
@@ -215,14 +219,16 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
                 "INSERT INTO pg_target.users SELECT * FROM users "
                 "WHERE uid IN (SELECT uid FROM changeset_stats WHERE seq_id <> 0) ON CONFLICT DO NOTHING"
             )
-            _push_changesets(conn, f"WHERE {live_ids}")
-            _push_changeset_stats(conn, "WHERE seq_id <> 0")
-            _push_changeset_hashtags(conn, f"WHERE {live_ids}")
+            # Chunked like the bulk path: one INSERT of the whole live tail exceeds the worker's memory
+            # once the tail grows to a month; per-range commits keep peak memory to a single chunk.
+            _push_chunked(conn, "changesets", _push_changesets, live_ids)
+            _push_chunked(conn, "changeset_stats", _push_changeset_stats, "seq_id <> 0")
+            _push_chunked(conn, "changesets", _push_changeset_hashtags, live_ids)
         else:
             conn.execute("INSERT INTO pg_target.users SELECT * FROM users ON CONFLICT DO NOTHING")
-            _push_changesets(conn)
-            _push_changeset_stats(conn)
-            _push_changeset_hashtags(conn)
+            _push_chunked(conn, "changesets", _push_changesets)
+            _push_chunked(conn, "changeset_stats", _push_changeset_stats)
+            _push_chunked(conn, "changesets", _push_changeset_hashtags)
 
         conn.execute(
             """

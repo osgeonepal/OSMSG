@@ -15,13 +15,13 @@ def _rows(result) -> list[dict[str, Any]]:
 
 
 def _tags_to_nested(tags: list[dict[str, Any]] | None) -> dict[str, dict[str, dict[str, Any]]]:
-    """The native `tags` list (list of {k, v, c, m, len_m}) as the nested {key: {value: {c, m, len}}}
+    """The native `tags` list (list of {k, v, c, m, l}) as the nested {key: {value: {c, m, len}}}
     shape `_accumulate_tags` sums over. len is omitted when absent."""
     out: dict[str, dict[str, dict[str, Any]]] = {}
     for t in tags or []:
         entry: dict[str, Any] = {"c": t["c"], "m": t["m"]}
-        if t["len_m"] is not None:
-            entry["len"] = t["len_m"]
+        if t["l"] is not None:
+            entry["len"] = t["l"]
         out.setdefault(t["k"], {})[t["v"]] = entry
     return out
 

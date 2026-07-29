@@ -19,11 +19,15 @@ COUNT_COLS: tuple[str, ...] = (
 # map_changes counts real geometry edits: nodes, ways, relations. poi is a derived tag view, excluded.
 MAP_CHANGES_COLS: tuple[str, ...] = tuple(c for c in COUNT_COLS if not c.startswith("poi"))
 
+# A computed way length above this (metres) is treated as a geometry error, not a real length: no single
+# OSM way spans 2000 km, so this catches null-island / corrupt-coordinate spans without dropping real ways.
+MAX_WAY_LENGTH_M = 2_000_000.0
+
 # The one per-changeset tag breakdown used everywhere (store, Postgres, published datasets): a DuckDB
-# LIST<STRUCT> of (key, value, creates, modifies, length_m), or in Postgres a PG_TAG_TYPE array.
-TAG_STRUCT_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)"
+# LIST<STRUCT> of (key, value, creates, modifies, length-in-metres `l`), or in Postgres a PG_TAG_TYPE array.
+TAG_STRUCT_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)"
 PG_TAG_TYPE = "osmsg_tag"
-PG_TAG_FIELDS = "k text, v text, c bigint, m bigint, len_m double precision"
+PG_TAG_FIELDS = "k text, v text, c bigint, m bigint, l double precision"
 
 
 def _col(prefix: str, name: str) -> str:
@@ -59,10 +63,10 @@ def prefix_upper_bound(prefix: str) -> str:
 
 
 def tag_breakdown_from_list(scope: str, *, tags_col: str = "tags") -> str:
-    """Tag key/value breakdown from a native LIST<STRUCT(k,v,c,m,len_m)> column (pre-exploded). `scope`
+    """Tag key/value breakdown from a native LIST<STRUCT(k,v,c,m,l)> column (pre-exploded). `scope`
     is a relation already deduped to one row per changeset. Exact and fast: no per-query JSON parse."""
     return f"""
         SELECT t.k AS tag_key, t.v AS tag_value,
-               SUM(t.c) AS creates, SUM(t.m) AS modifies, SUM(t.len_m) AS length_m
+               SUM(t.c) AS creates, SUM(t.m) AS modifies, SUM(t.l) AS length_m
         FROM (SELECT UNNEST({tags_col}) AS t FROM {scope}) GROUP BY t.k, t.v
     """

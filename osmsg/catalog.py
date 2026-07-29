@@ -93,7 +93,7 @@ def recent_tag_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     inner = (
         f"WITH m AS ({m}) "
         f"SELECT (t).k AS k, (t).v AS v, sum((t).c) AS creates, sum((t).m) AS modifies, "
-        f"sum((t).len_m) AS length_m FROM m JOIN changeset_stats s USING (changeset_id), unnest(s.tags) AS t "
+        f"sum((t).l) AS length_m FROM m JOIN changeset_stats s USING (changeset_id), unnest(s.tags) AS t "
         f"GROUP BY (t).k, (t).v"
     )
     return _pg_query(attach, inner)
@@ -170,7 +170,7 @@ def recent_user_tags(attach, uids: list[int], *, prefixes, frontier, start=None,
     uid_list = ", ".join(str(int(u)) for u in uids)
     ranges = " OR ".join(f"(lower(h) >= {_pg_str(lo)} AND lower(h) < {_pg_str(hi)})" for lo, hi in prefixes)
     inner = (
-        f"SELECT s.uid AS uid, (t).k AS k, (t).v AS v, sum((t).c) AS c, sum((t).m) AS m, sum((t).len_m) AS len_m "
+        f"SELECT s.uid AS uid, (t).k AS k, (t).v AS v, sum((t).c) AS c, sum((t).m) AS m, sum((t).l) AS l "
         f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(s.tags) AS t "
         f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} "
         f"AND EXISTS (SELECT 1 FROM unnest(c.hashtags) AS h WHERE {ranges}) GROUP BY s.uid, (t).k, (t).v"
@@ -223,7 +223,7 @@ def _recent_from_base(stats_rel: str, changesets_rel: str, window_sql: str, pref
         ),
         tag_rows AS (
             SELECT changeset_id, t.k AS k, t.v AS v,
-                   SUM(t.c) AS c, SUM(t.m) AS m, SUM(t.len_m) AS len_m
+                   SUM(t.c) AS c, SUM(t.m) AS m, SUM(t.l) AS l
             FROM (
                 SELECT s.changeset_id, UNNEST(s.tags) AS t
                 FROM {stats_rel} s JOIN matched USING (changeset_id)
@@ -232,7 +232,7 @@ def _recent_from_base(stats_rel: str, changesets_rel: str, window_sql: str, pref
             GROUP BY changeset_id, t.k, t.v
         ),
         tags AS (
-            SELECT changeset_id, list(struct_pack(k := k, v := v, c := c, m := m, len_m := len_m)) AS tags
+            SELECT changeset_id, list(struct_pack(k := k, v := v, c := c, m := m, l := l)) AS tags
             FROM tag_rows GROUP BY changeset_id
         )
         SELECT m.changeset_id, m.uid, m.editor, m.created_at, {payload}, COALESCE(t.tags, []) AS tags

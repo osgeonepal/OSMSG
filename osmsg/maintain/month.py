@@ -108,12 +108,11 @@ def _count(con: duckdb.DuckDBPyConnection, table: str) -> int:
 
 def upload(repo: str, out: pathlib.Path, year: int, month: int) -> None:
     """Upload the month's raw partitions and rollups to the HuggingFace dataset repo via the hf CLI."""
-    for dataset in ("changefiles", "changesets", "rollup/user"):
+    for dataset in ("changefiles", "changesets"):
         local = out / dataset / f"year={year}" / f"month={month}"
         _hf_upload(repo, local, f"{dataset}/year={year}/month={month}")
     for derived in (
         "rollup/hashtag_changeset/data.parquet",
-        "rollup/alltime_user/data.parquet",
         "rollup/users/data.parquet",
     ):
         _hf_upload(repo, out / derived, derived)

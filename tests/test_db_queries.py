@@ -9,12 +9,12 @@ from osmsg.db.queries import attach_metadata, attach_tag_stats, daily_summary, u
 
 
 def _tags_literal(nested: dict) -> str:
-    """A {key: {value: {c, m[, len]}}} dict as a DuckDB STRUCT(k,v,c,m,len_m)[] literal (test helper)."""
+    """A {key: {value: {c, m[, len]}}} dict as a DuckDB STRUCT(k,v,c,m,l)[] literal (test helper)."""
     parts = []
     for key, by_value in nested.items():
         for value, s in by_value.items():
-            len_m = "NULL" if s.get("len") is None else repr(s["len"])
-            parts.append(f"{{'k':'{key}','v':'{value}','c':{s['c']},'m':{s['m']},'len_m':{len_m}}}")
+            lm = "NULL" if s.get("len") is None else repr(s["len"])
+            parts.append(f"{{'k':'{key}','v':'{value}','c':{s['c']},'m':{s['m']},'l':{lm}}}")
     return "[" + ", ".join(parts) + "]"
 
 

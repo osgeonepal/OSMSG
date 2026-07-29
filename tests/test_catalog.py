@@ -24,7 +24,7 @@ def _make(con):
     zeros = ", ".join(["0"] * len(COUNT_COLS))
     con.execute(
         f"CREATE TABLE hc (hashtag VARCHAR, changeset_id BIGINT, uid BIGINT, editor VARCHAR, "
-        f"created_at TIMESTAMP, {cols}, tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[])"
+        f"created_at TIMESTAMP, {cols}, tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[])"
     )
     con.execute(
         f"""INSERT INTO hc VALUES
@@ -36,7 +36,7 @@ def _make(con):
     )
     con.execute(
         f"CREATE TABLE cs_stats (changeset_id BIGINT, seq_id BIGINT, uid BIGINT, {cols}, "
-        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[])"
+        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[])"
     )
     con.execute(
         f"""INSERT INTO cs_stats VALUES

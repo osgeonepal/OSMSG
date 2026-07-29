@@ -108,11 +108,11 @@ _CHANGESETS = [
     (300, 1, "alice", "2024-01-20", "JOSM", ["#missingmaps"], (13.1, 52.4, 13.3, 52.6)),
 ]
 # id, nodes_created, ways_created, tags (native LIST<STRUCT> literal or None)
-_TAGS_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[]"
+_TAGS_DDL = "STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[]"
 _CHANGEFILES = [
-    (100, 5, 1, "[{'k':'building','v':'yes','c':1,'m':0,'len_m':NULL}]"),
+    (100, 5, 1, "[{'k':'building','v':'yes','c':1,'m':0,'l':NULL}]"),
     (200, 3, 0, None),
-    (300, 0, 2, "[{'k':'highway','v':'residential','c':2,'m':0,'len_m':NULL}]"),
+    (300, 0, 2, "[{'k':'highway','v':'residential','c':2,'m':0,'l':NULL}]"),
 ]
 
 

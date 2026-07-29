@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS changeset_stats (
     rels_deleted   INTEGER DEFAULT 0,
     poi_created    INTEGER DEFAULT 0,
     poi_modified   INTEGER DEFAULT 0,
-    tags           STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, len_m DOUBLE)[],
+    tags           STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[],
     PRIMARY KEY (seq_id, changeset_id)
 );
 CREATE INDEX IF NOT EXISTS idx_changeset_stats_uid ON changeset_stats(uid);

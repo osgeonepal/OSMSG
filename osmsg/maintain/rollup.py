@@ -8,11 +8,7 @@ import duckdb
 
 from ..exceptions import OsmsgError
 from ..stats import COUNT_COLS as _COUNT_COLS
-from ..stats import map_changes_expr
 from .parquet import ROW_GROUP_SIZE
-
-_MAP_CHANGES = map_changes_expr()
-_SUMS = ", ".join(f"sum({col}) AS {col}" for col in _COUNT_COLS)
 
 
 def hashtag_changeset_select(stats_rel: str = "changeset_stats", changesets_rel: str = "changesets") -> str:
@@ -28,12 +24,12 @@ def hashtag_changeset_select(stats_rel: str = "changeset_stats", changesets_rel:
         ),
         tag_rows AS (
             SELECT changeset_id, t.k AS k, t.v AS v,
-                   SUM(t.c) AS c, SUM(t.m) AS m, SUM(t.len_m) AS len_m
+                   SUM(t.c) AS c, SUM(t.m) AS m, SUM(t.l) AS l
             FROM (SELECT changeset_id, UNNEST(tags) AS t FROM {stats_rel} WHERE tags IS NOT NULL AND len(tags) > 0)
             GROUP BY changeset_id, t.k, t.v
         ),
         merged_tags AS (
-            SELECT changeset_id, list(struct_pack(k := k, v := v, c := c, m := m, len_m := len_m)) AS tags
+            SELECT changeset_id, list(struct_pack(k := k, v := v, c := c, m := m, l := l)) AS tags
             FROM tag_rows GROUP BY changeset_id
         )
         SELECT lower(h) AS hashtag, p.changeset_id, p.uid, c.editor, c.created_at, {payload},
@@ -61,18 +57,14 @@ def write_hashtag_changeset_parquet(con: duckdb.DuckDBPyConnection, out: pathlib
     )
 
 
-def _month_partition(out: pathlib.Path, dataset: str, year: int, month: int) -> pathlib.Path:
-    return out / "rollup" / dataset / f"year={year}" / f"month={month}" / "data.parquet"
-
-
 def _copy(con: duckdb.DuckDBPyConnection, path: pathlib.Path, select: str, order_by: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     con.execute(f"COPY ({select} ORDER BY {order_by}) TO '{path}' (FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE})")
 
 
 def build_month_rollups(year: int, month: int, out: pathlib.Path) -> None:
-    """Build the user and hashtag_changeset rollups for one month from its raw partitions, then refresh
-    the derived users and alltime_user rollups. Idempotent: overwrites the month's partitions."""
+    """Build the hashtag_changeset and users rollups for one month from its raw partitions. Idempotent:
+    a re-run replaces the month's rows."""
     changefiles = out / "changefiles" / f"year={year}" / f"month={month}" / "data.parquet"
     changesets = out / "changesets" / f"year={year}" / f"month={month}" / "data.parquet"
     if not changefiles.exists() or not changesets.exists():
@@ -82,15 +74,8 @@ def build_month_rollups(year: int, month: int, out: pathlib.Path) -> None:
     con.execute(f"CREATE VIEW cf AS SELECT * FROM read_parquet('{changefiles}')")
     con.execute(f"CREATE VIEW cs AS SELECT * FROM read_parquet('{changesets}')")
 
-    _copy(
-        con,
-        _month_partition(out, "user", year, month),
-        f"SELECT uid, count(*) AS changesets, {_SUMS}, sum({_MAP_CHANGES}) AS map_changes FROM cf GROUP BY uid",
-        "uid",
-    )
     _refresh_hashtag_changeset(con, out)
     _refresh_users(con, out)
-    _refresh_alltime(con, out)
     con.close()
 
 
@@ -134,16 +119,3 @@ def _refresh_users(con: duckdb.DuckDBPyConnection, out: pathlib.Path) -> None:
     else:
         select = "SELECT uid, username FROM month_users"
     _copy(con, users, select, "uid")
-
-
-def _refresh_alltime(con: duckdb.DuckDBPyConnection, out: pathlib.Path) -> None:
-    """Re-aggregate every user month-rollup into one all-time file. A changeset lives in one month, so
-    this is a pure sum with no double-count."""
-    months = out / "rollup" / "user"
-    _copy(
-        con,
-        out / "rollup" / "alltime_user" / "data.parquet",
-        f"SELECT uid, sum(changesets) AS changesets, {_SUMS}, sum(map_changes) AS map_changes "
-        f"FROM read_parquet('{months}/**/data.parquet') GROUP BY uid",
-        "map_changes DESC",
-    )
