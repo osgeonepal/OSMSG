@@ -27,6 +27,7 @@ BATCH = 1_000_000
 CREATE, MODIFY, DELETE = 0, 1, 2
 DUCKDB_MEMORY_LIMIT = "48GB"
 DUCKDB_THREADS = 32
+DUCKDB_MAX_TEMP = "680GB"
 TAG_SHARDS = 64
 
 # Replicates osmium.geom.haversine_distance (R = 6372797.560856 m, per libosmium haversine.hpp) so join
@@ -223,31 +224,23 @@ def stream_changesets(dump: str, start: dt.datetime, end: dt.datetime, work: pat
 def _build_way_len(con: duckdb.DuckDBPyConnection, work: pathlib.Path) -> None:
     """way_len(way_id, length): haversine over each open-way-create's node coords (node first-version).
     A way is dropped (no length) if any node lacks coords or the total exceeds MAX_WAY_LENGTH_M, matching
-    osmium's InvalidLocationError / guard behaviour."""
+    osmium's InvalidLocationError / guard behaviour. Each node's v1 coord is a single row, so refs join
+    straight to raw_nodes with no dedup; validity and length fold into one per-way aggregate."""
     nodes = (work / "raw_nodes_*.parquet").as_posix()
     waynodes = (work / "raw_waynodes_*.parquet").as_posix()
     con.execute(HAVERSINE_MACRO)
     con.execute(
         f"""CREATE TABLE way_len AS
-            WITH node_loc AS (
-                SELECT node_id, any_value(lon) AS lon, any_value(lat) AS lat
-                FROM read_parquet('{nodes}') GROUP BY node_id
-            ),
-            pts AS (
-                SELECT wn.way_id, wn.seq, nl.lon, nl.lat
-                FROM read_parquet('{waynodes}') wn LEFT JOIN node_loc nl USING (node_id)
-            ),
-            valid AS (
-                SELECT way_id FROM pts GROUP BY way_id HAVING count(*) >= 2 AND count(*) = count(lon)
+            WITH pts AS (
+                SELECT wn.way_id, wn.seq, n.lat, n.lon
+                FROM read_parquet('{waynodes}') wn LEFT JOIN read_parquet('{nodes}') n USING (node_id)
             ),
             seg AS (
-                SELECT p.way_id,
-                       hav(p.lat, p.lon, lag(p.lat) OVER w, lag(p.lon) OVER w) AS d
-                FROM pts p SEMI JOIN valid v ON p.way_id = v.way_id
-                WINDOW w AS (PARTITION BY p.way_id ORDER BY p.seq)
+                SELECT way_id, lat, hav(lat, lon, lag(lat) OVER w, lag(lon) OVER w) AS d
+                FROM pts WINDOW w AS (PARTITION BY way_id ORDER BY seq)
             )
             SELECT way_id, sum(d) AS length FROM seg GROUP BY way_id
-            HAVING sum(d) <= {MAX_WAY_LENGTH_M}"""
+            HAVING count(*) >= 2 AND count(*) = count(lat) AND sum(d) <= {MAX_WAY_LENGTH_M}"""
     )
 
 
@@ -366,6 +359,7 @@ def aggregate(work: pathlib.Path, out: pathlib.Path) -> pathlib.Path:
     tmp.mkdir(exist_ok=True)
     con.execute(f"SET temp_directory='{tmp.as_posix()}'")
     con.execute(f"SET memory_limit='{DUCKDB_MEMORY_LIMIT}'")
+    con.execute(f"SET max_temp_directory_size='{DUCKDB_MAX_TEMP}'")
     con.execute(f"SET threads={DUCKDB_THREADS}")
     con.execute("SET preserve_insertion_order=false")
     create_tables(con)
