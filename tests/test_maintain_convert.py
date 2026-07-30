@@ -150,16 +150,67 @@ def _build_length_history(path: str) -> None:
     """An open 3-node way created in-window; node 1 also has a later version at a very different place, so
     the length must use the FIRST version's coords (osmium's first-write-wins), not the latest."""
     writer = osmium.SimpleWriter(path)
-    writer.add_node(mut.Node(id=1, version=1, visible=True, timestamp="2022-03-01T00:00:00Z",
-                             changeset=100, uid=1, user="a", location=(10.0, 20.0)))
-    writer.add_node(mut.Node(id=1, version=2, visible=True, timestamp="2023-03-01T00:00:00Z",
-                             changeset=200, uid=1, user="a", location=(15.0, 25.0)))  # moved far; must be ignored
-    writer.add_node(mut.Node(id=2, version=1, visible=True, timestamp="2022-03-01T00:00:00Z",
-                             changeset=100, uid=1, user="a", location=(10.001, 20.0)))
-    writer.add_node(mut.Node(id=3, version=1, visible=True, timestamp="2022-03-01T00:00:00Z",
-                             changeset=100, uid=1, user="a", location=(10.002, 20.001)))
-    writer.add_way(mut.Way(id=10, version=1, visible=True, timestamp="2022-03-01T01:00:00Z",
-                           changeset=100, uid=1, user="a", tags={"highway": "track"}, nodes=[1, 2, 3]))
+    writer.add_node(
+        mut.Node(
+            id=1,
+            version=1,
+            visible=True,
+            timestamp="2022-03-01T00:00:00Z",
+            changeset=100,
+            uid=1,
+            user="a",
+            location=(10.0, 20.0),
+        )
+    )
+    writer.add_node(
+        mut.Node(
+            id=1,
+            version=2,
+            visible=True,
+            timestamp="2023-03-01T00:00:00Z",
+            changeset=200,
+            uid=1,
+            user="a",
+            location=(15.0, 25.0),
+        )
+    )  # moved far; must be ignored
+    writer.add_node(
+        mut.Node(
+            id=2,
+            version=1,
+            visible=True,
+            timestamp="2022-03-01T00:00:00Z",
+            changeset=100,
+            uid=1,
+            user="a",
+            location=(10.001, 20.0),
+        )
+    )
+    writer.add_node(
+        mut.Node(
+            id=3,
+            version=1,
+            visible=True,
+            timestamp="2022-03-01T00:00:00Z",
+            changeset=100,
+            uid=1,
+            user="a",
+            location=(10.002, 20.001),
+        )
+    )
+    writer.add_way(
+        mut.Way(
+            id=10,
+            version=1,
+            visible=True,
+            timestamp="2022-03-01T01:00:00Z",
+            changeset=100,
+            uid=1,
+            user="a",
+            tags={"highway": "track"},
+            nodes=[1, 2, 3],
+        )
+    )
     writer.close()
 
 
@@ -169,8 +220,13 @@ def test_convert_length_matches_osmium(tmp_path):
     osh = str(tmp_path / "len.osh.pbf")
     _build_length_history(osh)
     pathlib.Path(tmp_path / "cs.osm").write_text(CHANGESET_DUMP)
-    out = convert(osh, str(tmp_path / "cs.osm"),
-                  dt.datetime(2021, 1, 1, tzinfo=UTC), dt.datetime(2025, 1, 1, tzinfo=UTC), tmp_path)
+    out = convert(
+        osh,
+        str(tmp_path / "cs.osm"),
+        dt.datetime(2021, 1, 1, tzinfo=UTC),
+        dt.datetime(2025, 1, 1, tzinfo=UTC),
+        tmp_path,
+    )
 
     # ground truth: osmium's own haversine over the FIRST-version coords, summed per segment
     c = osmium.geom.Coordinates

@@ -19,10 +19,7 @@ def store():
         "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[])"
     )
     b1 = "[{'k':'building','v':'yes','c':2,'m':1,'l':NULL}]"
-    b2 = (
-        "[{'k':'building','v':'yes','c':3,'m':0,'l':NULL},"
-        "{'k':'highway','v':'residential','c':1,'m':0,'l':NULL}]"
-    )
+    b2 = "[{'k':'building','v':'yes','c':3,'m':0,'l':NULL},{'k':'highway','v':'residential','c':1,'m':0,'l':NULL}]"
     # changeset 1: TWO seq rows (long-open changeset across diffs) -> must sum + merge tags.
     con.execute(
         f"""INSERT INTO changeset_stats VALUES
