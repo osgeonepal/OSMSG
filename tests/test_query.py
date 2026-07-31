@@ -41,7 +41,7 @@ def con():
     c.execute(
         "CREATE TABLE csets (changeset_id BIGINT, uid BIGINT, editor VARCHAR, created_at TIMESTAMP, hashtags VARCHAR[])"
     )
-    c.execute("INSERT INTO csets VALUES (3, 1, 'iD', '2026-07-05', ['#hotosm-project-2'])")
+    c.execute("INSERT INTO csets VALUES (3, 1, 'iD', '2026-07-05', ['#hotosm-project-2', '#waterproject'])")
     c.execute("CREATE TABLE users AS SELECT * FROM (VALUES (1, 'alice'), (2, 'bob')) t(uid, username)")
     return c
 
@@ -97,23 +97,25 @@ def test_leaderboard_includes_per_user_tag_stats(con, sources):
     assert bob["tag_stats"] == {}  # user with no tagged changesets
 
 
-def test_leaderboard_per_user_hashtags(con, sources):
-    # The user modal shows each contributor's hashtags; they come from the rollup `hashtag` column
-    # (history) and the base changesets `hashtags` list (recent), matching the queried prefix.
+def test_leaderboard_per_user_cooccurring_hashtags(con, sources):
+    # The user modal shows the hashtags each contributor tagged alongside the search (co-occurring):
+    # every hashtag on their matched changesets, so alice's recent changeset also surfaces #waterproject.
     items = query.leaderboard(con, "hotosm", sources)["items"]
     alice = next(r for r in items if r["name"] == "alice")
-    assert set(alice["hashtags"]) == {"#hotosm-project-1", "#hotosm-project-2"}  # history + recent
+    assert set(alice["hashtags"]) == {"#hotosm-project-1", "#hotosm-project-2", "#waterproject"}
     bob = next(r for r in items if r["name"] == "bob")
     assert bob["hashtags"] == ["#hotosm-project-1"]
 
 
-def test_trending_hashtags(con, sources):
-    # Contributors + edits per matched hashtag: project-1 has alice+bob (history, 10+6 edits), project-2
-    # has alice (recent, 5 edits).
+def test_cooccurring_hashtags(con, sources):
+    # Hashtags carried by the matched changesets (co-occurring), not just the searched ones: project-1
+    # from history (alice+bob), and on the recent changeset that matched via project-2 the panel also
+    # surfaces the co-tagged #waterproject.
     ht = query.hashtags(con, "hotosm", sources)
     assert ht == [
         {"hashtag": "#hotosm-project-1", "users": 2, "edits": 16},
         {"hashtag": "#hotosm-project-2", "users": 1, "edits": 5},
+        {"hashtag": "#waterproject", "users": 1, "edits": 5},
     ]
 
 

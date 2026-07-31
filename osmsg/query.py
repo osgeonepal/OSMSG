@@ -284,8 +284,9 @@ def _attach_user_hashtags(
     start: dt.datetime | None,
     end: dt.datetime | None,
 ) -> None:
-    """In-place: attach the distinct matching hashtags each returned user contributed under, from the
-    rollup `hashtag` column (history) and the base changesets' `hashtags` list (recent)."""
+    """In-place: attach the hashtags each returned user tagged alongside the search (co-occurring), i.e.
+    every hashtag carried by that user's matched changesets, from the rollup (history) and the base
+    changesets list (recent). Reveals which other projects and campaigns each contributor worked on."""
     for r in rows:
         r["hashtags"] = []
     if not rows:
@@ -295,21 +296,27 @@ def _attach_user_hashtags(
     window_sql, window_params = catalog._window_clause(start, end)
     prefix_params = [bound for pair in prefixes for bound in pair]
     hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
-    hist = (
-        f"SELECT uid, hashtag FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?{window_sql} AND uid IN ({ph})"
+    matched_cs = (
+        f"SELECT DISTINCT changeset_id FROM {s.history_rel} "
+        f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND uid IN ({ph})"
     )
-    hist_params = [*prefix_params, s.frontier, *window_params, *uids]
+    hist = (
+        f"SELECT h.uid, h.hashtag FROM {s.history_rel} h JOIN ({matched_cs}) m USING (changeset_id) "
+        f"WHERE h.created_at < ?{window_sql}"
+    )
+    hist_params = [*prefix_params, s.frontier, *window_params, *uids, s.frontier, *window_params]
     if s.pg_attach:
-        rrel = catalog.recent_user_hashtags(
+        rrel = catalog.recent_user_cooccur_hashtags(
             s.pg_attach, uids, prefixes=prefixes, frontier=s.frontier, start=start, end=end
         )
         recent = f"SELECT uid, hashtag FROM {rrel}"
         params = hist_params
     else:
-        recent_pred = " OR ".join("(lower(h) >= ? AND lower(h) < ?)" for _ in prefixes)
+        recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
         recent = (
             f"SELECT uid, h AS hashtag FROM (SELECT uid, UNNEST(hashtags) AS h FROM {s.recent_changesets_rel} "
-            f"WHERE created_at >= ?{window_sql} AND uid IN ({ph})) WHERE {recent_pred}"
+            f"WHERE created_at >= ?{window_sql} AND uid IN ({ph}) "
+            f"AND EXISTS (SELECT 1 FROM UNNEST(hashtags) AS t(x) WHERE {recent_pred}))"
         )
         params = [*hist_params, s.frontier, *window_params, *uids, *prefix_params]
     result = con.execute(
@@ -521,37 +528,54 @@ def hashtags(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> list[dict[str, Any]]:
-    """Matched hashtags with their distinct contributors and total edits, most contributors first:
-    `[{hashtag, users, edits}]`. Optional [start, end) window."""
+    """Hashtags carried by the changesets that match the search (co-occurring), ranked by distinct
+    contributors then total edits: `[{hashtag, users, edits}]`. Reveals which other hashtags and
+    projects were used alongside the searched hashtag. Optional [start, end) window."""
     prefixes = _prefixes(hashtag)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     window_sql, window_params = catalog._window_clause(start, end)
     prefix_params = [bound for pair in prefixes for bound in pair]
     hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
-    hist_part = (
-        f"SELECT hashtag, uid, {map_changes_expr()} AS mc FROM {s.history_rel} "
-        f"WHERE ({hist_pred}) AND created_at < ?{window_sql}"
+
+    parts: list[str] = []
+    params: list[object] = []
+
+    # History side: every hashtag carried by a matched changeset, via a self-join on changeset_id.
+    # Gated by a cheap count so a mega-hashtag over history does not scan the whole rollup.
+    hc_sql, hc_params = catalog.history_scope_count(
+        s.history_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
     )
-    hist_params = [*prefix_params, s.frontier, *window_params]
+    hc_row = con.execute(hc_sql, hc_params).fetchone()
+    hist_count = hc_row[0] if hc_row else 0
+    if 0 < hist_count <= _MAX_TAG_ROWS:
+        matched_cs = (
+            f"SELECT DISTINCT changeset_id FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?{window_sql}"
+        )
+        parts.append(
+            f"SELECT h.hashtag AS hashtag, h.uid AS uid, {map_changes_expr('h')} AS mc "
+            f"FROM {s.history_rel} h JOIN ({matched_cs}) m USING (changeset_id) WHERE h.created_at < ?{window_sql}"
+        )
+        params += [*prefix_params, s.frontier, *window_params, s.frontier, *window_params]
+
+    # Recent side: every hashtag carried by a matched changeset in the live tail.
     if _use_pg(s):
-        rrel = catalog.recent_hashtag_agg(s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
-        recent_part = f"SELECT hashtag, uid, mc FROM {rrel}"
-        params = [*hist_params, limit]
+        rrel = catalog.recent_cooccur_agg(s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
+        parts.append(f"SELECT hashtag, uid, mc FROM {rrel}")
     else:
-        recent_pred = " OR ".join("(lower(h) >= ? AND lower(h) < ?)" for _ in prefixes)
-        recent_part = (
+        recent_match = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
+        parts.append(
             f"SELECT h AS hashtag, uid, mc FROM (SELECT c.uid, UNNEST(c.hashtags) AS h, cs.mc AS mc "
             f"FROM {s.recent_changesets_rel} c JOIN (SELECT changeset_id, {map_changes_sum(alias='mc')} "
             f"FROM {s.recent_stats_rel} GROUP BY changeset_id) cs USING (changeset_id) "
-            f"WHERE c.created_at >= ?{window_sql}) WHERE {recent_pred}"
+            f"WHERE c.created_at >= ?{window_sql} AND EXISTS "
+            f"(SELECT 1 FROM UNNEST(c.hashtags) AS t(x) WHERE {recent_match}))"
         )
-        params = [*hist_params, s.frontier, *window_params, *prefix_params, limit]
+        params += [s.frontier, *window_params, *prefix_params]
+
+    params.append(limit)
     res = con.execute(
-        f"""
-        SELECT hashtag, count(DISTINCT uid) AS users, COALESCE(SUM(mc), 0) AS edits
-        FROM ({hist_part} UNION ALL {recent_part})
-        GROUP BY hashtag ORDER BY users DESC, hashtag ASC LIMIT ?
-        """,
+        f"SELECT hashtag, count(DISTINCT uid) AS users, COALESCE(SUM(mc), 0) AS edits "
+        f"FROM ({' UNION ALL '.join(parts)}) GROUP BY hashtag ORDER BY users DESC, hashtag ASC LIMIT ?",
         params,
     )
     return _rows(res)

@@ -144,6 +144,20 @@ def recent_hashtag_agg(attach, *, prefixes, frontier, start=None, end=None) -> s
     return _pg_query(attach, inner)
 
 
+def recent_cooccur_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (hashtag, uid) recent aggregate over ALL hashtags carried by the matched changesets, so the
+    panel can show which other hashtags and projects were used alongside the search (co-occurring).
+    Same as `recent_hashtag_agg` but without narrowing the joined hashtags to the searched ranges."""
+    m = _pg_matched(prefixes, frontier, start, end)
+    inner = (
+        f"WITH m AS ({m}), pc AS (SELECT s.changeset_id, max(s.uid) AS uid, sum({_MC}) AS mc "
+        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id) "
+        f"SELECT ch.hashtag AS hashtag, pc.uid AS uid, count(*) AS changesets, sum(pc.mc) AS mc "
+        f"FROM pc JOIN changeset_hashtag ch USING (changeset_id) GROUP BY ch.hashtag, pc.uid"
+    )
+    return _pg_query(attach, inner)
+
+
 def recent_map_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     """Per-changeset recent centroids (changeset_id, uid, lon, lat) from the bbox midpoint. Powers the map."""
     m = _pg_matched(prefixes, frontier, start, end)
@@ -187,6 +201,20 @@ def recent_user_hashtags(attach, uids: list[int], *, prefixes, frontier, start=N
         f"SELECT DISTINCT s.uid AS uid, h AS hashtag "
         f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
         f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} AND ({ranges})"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_user_cooccur_hashtags(attach, uids: list[int], *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (uid, hashtag) recent membership over ALL hashtags carried by each user's matched changesets,
+    so the profile can show which other hashtags and projects the user tagged alongside the search."""
+    uid_list = ", ".join(str(int(u)) for u in uids)
+    ranges = " OR ".join(f"(lower(x) >= {_pg_str(lo)} AND lower(x) < {_pg_str(hi)})" for lo, hi in prefixes)
+    inner = (
+        f"SELECT DISTINCT s.uid AS uid, h AS hashtag "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
+        f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} "
+        f"AND EXISTS (SELECT 1 FROM unnest(c.hashtags) AS x WHERE {ranges})"
     )
     return _pg_query(attach, inner)
 
