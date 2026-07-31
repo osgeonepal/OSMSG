@@ -8,7 +8,7 @@ import pytest
 
 from osmsg import pipeline
 from osmsg.db.schema import create_tables, get_state, upsert_state
-from osmsg.pipeline import RunConfig, _select_update_source, _tracked_sources
+from osmsg.pipeline import RunConfig, _cap_update_window, _select_update_source, _tracked_sources
 from osmsg.replication import SHORTCUTS
 
 UTC = dt.UTC
@@ -77,3 +77,19 @@ def test_explicit_switch_day_to_minute_hands_off(conn):
     assert cfg.urls == [SHORTCUTS["minute"]]
     assert _tracked_sources(conn) == [SHORTCUTS["minute"]]
     assert get_state(conn, SHORTCUTS["minute"])["last_ts"] == boundary
+
+
+def test_cap_update_window_narrows_a_large_gap():
+    start = NOW - dt.timedelta(days=5)
+    capped = _cap_update_window(start, NOW, dt.timedelta(days=1))
+    assert capped == start + dt.timedelta(days=1)
+
+
+def test_cap_update_window_no_op_when_gap_within_window():
+    start = NOW - dt.timedelta(hours=3)
+    assert _cap_update_window(start, NOW, dt.timedelta(days=1)) == NOW
+
+
+def test_cap_update_window_off_by_default():
+    start = NOW - dt.timedelta(days=30)
+    assert _cap_update_window(start, NOW, None) == NOW

@@ -94,6 +94,7 @@ class RunConfig:
     psql_dsn: str | None = None
     psql_bulk: bool = False
     changeset_pad_hours: int = ChangesetReplication.DEFAULT_PAD_HOURS
+    max_update_window: dt.timedelta | None = None
     history_mode: str = "auto"  # auto | off
     history_url: str = "hf://datasets/kshitijrajsharma/osmsg-history"
     insert: bool = False
@@ -143,6 +144,13 @@ def _auto_switch_replication(cfg: RunConfig, span: dt.timedelta) -> None:
         f"Pass --url {cur_label} to keep '{cur_label}'."
     )
     cfg.urls = [target_url]
+
+
+def _cap_update_window(start: dt.datetime, end: dt.datetime, window: dt.timedelta | None) -> dt.datetime:
+    """End of this run's window: `start + window` when a cap is set and the gap exceeds it, else `end`."""
+    if window is None:
+        return end
+    return min(end, start + window)
 
 
 def _canonical_hashtags(hashtags: list[str]) -> list[str]:
@@ -717,6 +725,13 @@ def run(cfg: RunConfig) -> dict[str, Any]:
             "--update: resuming each source from its own state row "
             f"(earliest: {cfg.start_date.astimezone(UTC).isoformat()})"
         )
+        # Bound each run to a fixed window so a large backlog catches up over successive ticks,
+        # each committing its slice, instead of accumulating the whole gap in one pass. Source
+        # granularity was already picked from the full gap-to-now, so it stays coarse while behind.
+        capped_end = _cap_update_window(cfg.start_date, cfg.end_date, cfg.max_update_window)
+        if capped_end < cfg.end_date:
+            cfg.end_date = capped_end
+            info(f"--update: capping this run to {cfg.max_update_window}; remainder resumes next tick.")
 
     # _resolve_url_starts guarantees start_date is set (or raised); narrow for ty.
     assert cfg.start_date is not None

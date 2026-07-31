@@ -236,6 +236,16 @@ def main(
             max=48,
         ),
     ] = 1,
+    max_update_window_hours: Annotated[
+        float | None,
+        typer.Option(
+            "--max-update-window-hours",
+            envvar="OSMSG_MAX_UPDATE_WINDOW_HOURS",
+            help="Cap each --update run to this many hours of diffs; the rest resumes on the next run. "
+            "Keeps a large backlog catching up in bounded, incrementally committed slices. Off by default.",
+            min=0,
+        ),
+    ] = None,
     history: Annotated[
         bool,
         typer.Option(
@@ -350,6 +360,7 @@ def main(
         psql_dsn=psql_dsn,
         psql_bulk=psql_bulk,
         changeset_pad_hours=changeset_pad_hours,
+        max_update_window=(dt.timedelta(hours=max_update_window_hours) if max_update_window_hours else None),
         history_mode="auto" if history else "off",
         history_url=history_url,
         insert=insert,
