@@ -3,10 +3,12 @@ from importlib import import_module
 import pytest
 from litestar import Litestar, get
 from litestar.config.cors import CORSConfig
+from litestar.contrib.jinja import JinjaTemplateEngine
+from litestar.template.config import TemplateConfig
 from litestar.testing import TestClient
 
 from api import app as api_app
-from api.app import get_cors_origins, health
+from api.app import get_cors_origins, get_ga_measurement_id, health
 from api.pg_schema import PG_SCHEMA as API_PG_SCHEMA
 from osmsg.pg_schema import PG_SCHEMA as CLI_PG_SCHEMA
 
@@ -116,6 +118,42 @@ def test_get_cors_origins_defaults_include_public_frontends(monkeypatch):
 
     assert "https://osgeonepal.github.io" in origins
     assert "https://osmsg.osgeonepal.org" in origins
+
+
+def test_get_ga_measurement_id_reads_trimmed_env(monkeypatch):
+    monkeypatch.setenv("OSMSG_GA_MEASUREMENT_ID", "  G-TEST12345  ")
+    assert get_ga_measurement_id() == "G-TEST12345"
+
+
+def test_get_ga_measurement_id_empty_env_returns_none(monkeypatch):
+    monkeypatch.delenv("OSMSG_GA_MEASUREMENT_ID", raising=False)
+    assert get_ga_measurement_id() is None
+
+
+def test_home_includes_analytics_snippet_when_configured(monkeypatch):
+    app_module = import_module("api.app")
+    monkeypatch.setenv("OSMSG_GA_MEASUREMENT_ID", "G-TEST12345")
+    app = Litestar(
+        route_handlers=[app_module.home],
+        template_config=TemplateConfig(directory=app_module.TEMPLATES, engine=JinjaTemplateEngine),
+    )
+    with TestClient(app=app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert "www.googletagmanager.com/gtag/js?id=G-TEST12345" in response.text
+
+
+def test_home_omits_analytics_snippet_when_unset(monkeypatch):
+    app_module = import_module("api.app")
+    monkeypatch.delenv("OSMSG_GA_MEASUREMENT_ID", raising=False)
+    app = Litestar(
+        route_handlers=[app_module.home],
+        template_config=TemplateConfig(directory=app_module.TEMPLATES, engine=JinjaTemplateEngine),
+    )
+    with TestClient(app=app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert "www.googletagmanager.com/gtag/js?id=" not in response.text
 
 
 def test_app_cors_allows_whitelisted_browser_preflight(monkeypatch):

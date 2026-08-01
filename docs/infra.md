@@ -47,6 +47,9 @@ sudo cp /opt/osmsg/infra/osmsg.service /etc/systemd/system/ && sudo systemctl da
 sudo systemctl enable --now osmsg
 ```
 
+To enable analytics on the API home page (`/`), set `OSMSG_GA_MEASUREMENT_ID` in `infra/.env` to your
+GA4 measurement id (`G-...`). Leave it unset to disable tracking.
+
 `OSMSG_EXTRA_ARGS` runs every tick. Do not put `--last`, `--days`, `--update`, or `--url` there: the
 worker adds `--update` and auto-selects granularity from the gap (day to hour to minute). Pinning
 `--url minute` over a large gap crawls tens of thousands of files and fills the disk.

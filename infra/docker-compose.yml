@@ -33,6 +33,7 @@ services:
     environment:
       DATABASE_URL: postgresql://osmsg:osmsg@db:5432/osmsg
       OSMSG_QUERY_CACHE_DIR: ${OSMSG_QUERY_CACHE_DIR:-}
+      OSMSG_GA_MEASUREMENT_ID: ${OSMSG_GA_MEASUREMENT_ID:-}
     depends_on:
       db:
         condition: service_healthy
