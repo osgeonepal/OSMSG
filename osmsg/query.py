@@ -225,6 +225,22 @@ def summary(
 # the aggregate tag breakdown is served by the /tags endpoint instead).
 _MAX_TAG_ROWS = 1_500_000
 
+# The co-occurring self-join scans every rollup row in the window (all hashtags), which only the window's
+# created_at partitions prune. Run it only when that scan is bounded; an all-time or very wide window reads
+# the whole rollup (~20s+), so skip the history side there and use the live recent tail alone.
+_COOCCUR_MAX_SCAN_ROWS = 3_000_000
+
+
+def _cooccur_history_cheap(
+    con: duckdb.DuckDBPyConnection, s: Sources, start: dt.datetime | None, end: dt.datetime | None
+) -> bool:
+    window_sql, window_params = catalog._window_clause(start, end)
+    row = con.execute(
+        f"SELECT count(*) FROM {s.history_rel} WHERE created_at < ?{window_sql}",
+        [s.frontier, *window_params],
+    ).fetchone()
+    return bool(row) and 0 < row[0] <= _COOCCUR_MAX_SCAN_ROWS
+
 
 def _attach_user_tags(
     con: duckdb.DuckDBPyConnection,
@@ -305,12 +321,13 @@ def _attach_user_hashtags(
         f"WHERE h.created_at < ?{window_sql}"
     )
     hist_params = [*prefix_params, s.frontier, *window_params, *uids, s.frontier, *window_params]
+    hist_cheap = _cooccur_history_cheap(con, s, start, end)
     if s.pg_attach:
         rrel = catalog.recent_user_cooccur_hashtags(
             s.pg_attach, uids, prefixes=prefixes, frontier=s.frontier, start=start, end=end
         )
         recent = f"SELECT uid, hashtag FROM {rrel}"
-        params = hist_params
+        recent_params: list[object] = []
     else:
         recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
         recent = (
@@ -318,9 +335,13 @@ def _attach_user_hashtags(
             f"WHERE created_at >= ?{window_sql} AND uid IN ({ph}) "
             f"AND EXISTS (SELECT 1 FROM UNNEST(hashtags) AS t(x) WHERE {recent_pred}))"
         )
-        params = [*hist_params, s.frontier, *window_params, *uids, *prefix_params]
+        recent_params = [s.frontier, *window_params, *uids, *prefix_params]
+    if hist_cheap:
+        combined, params = f"{hist} UNION ALL {recent}", [*hist_params, *recent_params]
+    else:
+        combined, params = recent, recent_params
     result = con.execute(
-        f"SELECT uid, list(DISTINCT hashtag) AS hashtags FROM ({hist} UNION ALL {recent}) GROUP BY uid",
+        f"SELECT uid, list(DISTINCT hashtag) AS hashtags FROM ({combined}) GROUP BY uid",
         params,
     ).fetchall()
     by_uid = {uid: list(hashtags or []) for uid, hashtags in result}
@@ -547,7 +568,7 @@ def hashtags(
     )
     hc_row = con.execute(hc_sql, hc_params).fetchone()
     hist_count = hc_row[0] if hc_row else 0
-    if 0 < hist_count <= _MAX_TAG_ROWS:
+    if 0 < hist_count <= _MAX_TAG_ROWS and _cooccur_history_cheap(con, s, start, end):
         matched_cs = (
             f"SELECT DISTINCT changeset_id FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?{window_sql}"
         )
