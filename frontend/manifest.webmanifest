@@ -1,0 +1,43 @@
+{
+    "name": "OSMSG Leaderboard",
+    "short_name": "OSMSG",
+    "description": "Live OpenStreetMap contributor stats by hashtag. An OSGeo Nepal project.",
+    "start_url": "./",
+    "scope": "./",
+    "display": "standalone",
+    "orientation": "any",
+    "theme_color": "#2D5F3F",
+    "background_color": "#FAF8F2",
+    "categories": [
+        "productivity",
+        "utilities",
+        "developer"
+    ],
+    "lang": "en",
+    "dir": "ltr",
+    "icons": [
+        {
+            "src": "https://github.com/osgeonepal.png",
+            "sizes": "any",
+            "type": "image/png",
+            "purpose": "any"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Last 24 hours",
+            "short_name": "24h",
+            "url": "?range=24h"
+        },
+        {
+            "name": "Last 7 days",
+            "short_name": "7d",
+            "url": "?range=7d"
+        },
+        {
+            "name": "All-time",
+            "short_name": "All",
+            "url": "?range=all"
+        }
+    ]
+}

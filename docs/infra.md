@@ -38,14 +38,19 @@ api.osmsg.<domain>  A   <server-ip>
 
 ## Configure and deploy
 
+The frontend ships in this repo under `frontend/`, and Caddy serves it from `../frontend` relative to
+the compose file. Clone the repo to `/opt/osmsg` so `infra/` and `frontend/` sit side by side.
+
 ```bash
+sudo git clone https://github.com/osgeonepal/osmsg.git /opt/osmsg
+cd /opt/osmsg
 cp infra/.env.example infra/.env && $EDITOR infra/.env   # set the two domains + ACME email
-sudo mkdir -p /opt/osmsg/infra
-sudo cp infra/docker-compose.yml infra/Caddyfile infra/osmsg.service infra/.env /opt/osmsg/infra/
-sudo git clone https://github.com/osgeonepal/osmsg-leaderboard.git /opt/osmsg-leaderboard
-sudo cp /opt/osmsg/infra/osmsg.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo cp infra/osmsg.service /etc/systemd/system/ && sudo systemctl daemon-reload
 sudo systemctl enable --now osmsg
 ```
+
+Deploy updates with `git -C /opt/osmsg pull` (refreshes both the frontend and the compose files);
+`infra/.env` and any `infra/docker-compose.override.yml` are gitignored and stay untouched.
 
 `OSMSG_EXTRA_ARGS` runs every tick. Do not put `--last`, `--days`, `--update`, or `--url` there: the
 worker adds `--update` and auto-selects granularity from the gap (day to hour to minute). Pinning

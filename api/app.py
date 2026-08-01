@@ -4,19 +4,16 @@ from pathlib import Path
 
 from litestar import Litestar, get
 from litestar.config.cors import CORSConfig
-from litestar.contrib.jinja import JinjaTemplateEngine
 from litestar.openapi.config import OpenAPIConfig
 from litestar.openapi.plugins import SwaggerRenderPlugin
-from litestar.response import Template
+from litestar.response import Redirect
 from litestar.static_files import create_static_files_router
-from litestar.template.config import TemplateConfig
 
 from .db import close_pool, ensure_schema, open_pool
 from .queries import fetch_state
 from .routers.hashtag import v2_router
 from .schemas import HealthResponse
 
-TEMPLATES = Path(__file__).parent / "templates"
 FRONTEND_DIST = os.getenv("FRONTEND_DIST")
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
@@ -48,13 +45,14 @@ async def lifespan(app: Litestar):
 
 
 @get("/", include_in_schema=False)
-async def home() -> Template:
-    return Template("home.html")
+async def home() -> Redirect:
+    return Redirect(path="/docs")
 
 
 def _root_handlers() -> list:
-    """Serve the built frontend at / when FRONTEND_DIST is a directory, else the API home page. Explicit API
-    routes (/health, /api/*, /docs) take precedence over the static catch-all; html_mode serves index.html."""
+    """Serve the built frontend at / when FRONTEND_DIST is a directory, else redirect to the API docs.
+    Explicit API routes (/health, /api/*, /docs) take precedence over the static catch-all; html_mode
+    serves index.html."""
     if FRONTEND_DIST and Path(FRONTEND_DIST).is_dir():
         return [create_static_files_router(path="/", directories=[FRONTEND_DIST], html_mode=True)]
     return [home]
@@ -88,5 +86,4 @@ app = Litestar(
         path="/docs",
         render_plugins=[SwaggerRenderPlugin()],
     ),
-    template_config=TemplateConfig(directory=TEMPLATES, engine=JinjaTemplateEngine),  # ty: ignore[invalid-argument-type]
 )

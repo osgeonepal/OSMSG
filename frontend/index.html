@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#2D5F3F" />
+  <meta name="description"
+    content="Live OpenStreetMap contributor rankings by hashtag. An OSGeo Nepal project, powered by osmsg." />
+  <title>OSMSG · Leaderboard</title>
+  <link rel="icon" type="image/png" href="https://github.com/osgeonepal.png" />
+  <link rel="apple-touch-icon" href="https://github.com/osgeonepal.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="tailwind.config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.469.0/dist/umd/lucide.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
+</head>
+
+<body>
+  <header class="topbar" role="banner">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="OSMSG Leaderboard home">
+        <img class="brand-logo" src="https://github.com/osgeonepal.png" alt="OSGeo Nepal logo" width="36" height="36" />
+        <span class="min-w-0 leading-tight">
+          <span class="brand-title">OSMSG</span>
+          <span class="brand-sub block">OpenStreetMap Stats Leaderboard</span>
+        </span>
+      </a>
+      <div class="header-tools">
+        <div class="clock-pill" id="header-clock" aria-label="Local time">
+          <i data-lucide="clock" class="ico-sm"></i>
+          <span class="v" id="wb-localtime">…</span>
+          <span class="tz" id="wb-tzname"></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero">
+    <form id="query-form" class="search-card" autocomplete="off">
+      <div class="field">
+        <label for="hashtag-input"><i data-lucide="hash" class="ico-sm"></i> Hashtags
+          <span class="info-tip" tabindex="0" role="img" aria-label="Press Enter to add a hashtag. Leave empty for global stats. Multiple hashtags are OR-combined."
+            data-tip="Type a hashtag and press Enter to add it. Add several to combine them. Then hit Extract.">
+            <i data-lucide="info" class="ico-sm"></i>
+          </span>
+        </label>
+        <div class="field-input" id="hashtag-field">
+          <i data-lucide="hash" class="ico-md"></i>
+          <div id="chips" class="chips" aria-live="polite"></div>
+          <input id="hashtag-input" type="text" placeholder="hotosm, osmnepal, osgeonepal " />
+        </div>
+      </div>
+      <div class="field">
+        <label><i data-lucide="calendar-range" class="ico-sm"></i> Time range</label>
+        <div class="preset" role="group" aria-label="Time range presets">
+          <button type="button" data-range="1h">1h</button>
+          <button type="button" data-range="24h" aria-pressed="true">24h</button>
+          <button type="button" data-range="7d">7d</button>
+          <button type="button" data-range="30d">30d</button>
+          <button type="button" data-range="all">All-time</button>
+          <button type="button" data-range="custom"><i data-lucide="sliders-horizontal" class="ico-sm"></i>
+            Custom</button>
+        </div>
+      </div>
+      <div class="field search-actions">
+        <label class="field-spacer" aria-hidden="true">&#160;</label>
+        <button type="submit" id="search-btn" class="btn-search">
+          <span class="btn-spinner" aria-hidden="true"></span>
+          <i data-lucide="arrow-down-to-line" class="ico-sm btn-ico"></i>
+          <span class="btn-label">Extract</span>
+        </button>
+      </div>
+      <div id="recent-searches" class="recent-searches" aria-label="Recent searches" hidden></div>
+      <div id="custom-range" class="custom-range" aria-label="Custom date range">
+        <div class="cr-head">
+          <div class="cr-head-label">Selected range (UTC)</div>
+          <span class="cr-chip" id="cr-chip">
+            <i data-lucide="calendar-range" class="ico-sm"></i>
+            <span id="cr-chip-text">Pick a start and end date</span>
+          </span>
+          <button type="button" id="cr-clear" class="cr-clear-link" hidden>Clear range</button>
+        </div>
+        <input id="cr-range" type="text" class="cr-hidden-input" autocomplete="off" readonly tabindex="-1"
+          aria-hidden="true" />
+      </div>
+    </form>
+  </section>
+
+  <div class="windowbar">
+    <div class="wb-item" id="wb-window"><i data-lucide="calendar-range" class="ico-sm"></i><span
+        class="k">Window</span><span class="v" id="wb-window-text">…</span></div>
+    <div class="wb-item" id="last-updated" aria-live="polite" role="button" tabindex="0"
+        title="Click to refresh" style="cursor:pointer"><i data-lucide="refresh-cw" class="ico-sm"></i><span
+        class="k">Updated</span><span class="v" id="last-updated-text">never</span></div>
+    <div class="wb-right">
+      <span class="ov-breakdown-meta" id="ov-breakdown-meta"></span>
+      <button type="button" class="ov-toggle-btn" id="ov-toggle-btn" aria-expanded="false"
+        aria-controls="ov-details">
+        <span id="ov-toggle-label">Show details</span><span class="ov-caret" aria-hidden="true">▾</span>
+      </button>
+    </div>
+  </div>
+  <main role="main">
+    <section aria-label="Overview">
+      <div id="overview">
+        <div class="overview-strip" id="ov-strip-totals"></div>
+        <div id="ov-details" hidden>
+          <div class="overview-strip" id="ov-strip"></div>
+          <div class="ov-breakdown" id="ov-breakdown"></div>
+        </div>
+      </div>
+    </section>
+
+
+    <section aria-labelledby="podium-title">
+      <h2 id="podium-title" class="sr-only">Top three contributors</h2>
+      <div class="podium" id="podium" aria-live="polite"></div>
+    </section>
+    <section aria-label="Leaderboard">
+      <div class="table-wrap">
+        <div class="table-controls">
+          <div class="search-input">
+            <i data-lucide="search"></i>
+            <input id="search" type="search" placeholder="Search contributor…" aria-label="Search contributor" />
+          </div>
+          <span class="stack-legend">
+            <span><span class="sw bg-add"></span>created</span>
+            <span><span class="sw bg-mod"></span>modified</span>
+            <span><span class="sw bg-del"></span>deleted</span>
+          </span>
+          <button class="btn-ghost ml-auto" id="export-btn" type="button">
+            <i data-lucide="download" class="ico-sm"></i> Export CSV
+          </button>
+        </div>
+        <div class="table-scroll">
+          <table class="lb" aria-label="Contributor leaderboard">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th class="sortable" data-sort="username">Mapper <i data-lucide="chevrons-up-down" class="arrow"></i>
+                </th>
+                <th class="sortable text-right" data-sort="map_changes" aria-sort="descending">Total <i
+                    data-lucide="arrow-down" class="arrow"></i></th>
+                <th class="sortable col-num" data-sort="created">Created <i data-lucide="chevrons-up-down"
+                    class="arrow"></i></th>
+                <th class="sortable col-num" data-sort="modified">Modified <i data-lucide="chevrons-up-down"
+                    class="arrow"></i></th>
+                <th class="sortable col-num" data-sort="deleted">Deleted <i data-lucide="chevrons-up-down"
+                    class="arrow"></i></th>
+                <th class="sortable col-num col-cs" data-sort="changesets">Changesets <i data-lucide="chevrons-up-down"
+                    class="arrow"></i></th>
+                <th class="col-spark">Mix</th>
+              </tr>
+            </thead>
+            <tbody id="lb-body">
+              <tr>
+                <td colspan="8" class="py-14 text-center text-muted">Loading…</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="pagination" hidden>
+          <div class="pagination-info" id="pg-info"></div>
+          <div class="pagination-controls" id="pg-controls"></div>
+          <label class="page-size">Rows
+            <select id="pg-size">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="modal-backdrop" id="user-modal" role="dialog" aria-modal="true" aria-labelledby="user-modal-name" hidden>
+    <div class="modal" role="document">
+      <div class="modal-head">
+        <span class="pod-avatar !w-12 !h-12 !mt-0 !text-base" id="user-modal-avatar">·</span>
+        <div class="modal-title min-w-0 flex-1">
+          <div class="name" id="user-modal-name">…</div>
+          <div class="sub" id="user-modal-sub"></div>
+        </div>
+        <button type="button" class="modal-close" id="user-modal-close" aria-label="Close"><i
+            data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body" id="user-modal-body"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="methodology-modal" role="dialog" aria-modal="true"
+    aria-label="How the numbers are calculated" hidden>
+    <div class="modal" role="document">
+      <div class="modal-head mth-head">
+        <button type="button" class="modal-close" id="methodology-close" aria-label="Close"><i
+            data-lucide="x"></i></button>
+      </div>
+      <div class="modal-body methodology">
+        <section class="mth-sec">
+          <h3><i data-lucide="layers"></i> The core counts</h3>
+          <p>Every edit to a map element (a node, way, or relation) is counted by what it did to that element:</p>
+          <ul>
+            <li>Created: a brand-new element (its first version).</li>
+            <li>Modified: an existing element that was changed.</li>
+            <li>Deleted: an element that was removed.</li>
+          </ul>
+          <p>Map changes is the sum of created, modified, and deleted. Changesets counts the edit
+            sessions, and Contributors counts the distinct mappers.</p>
+        </section>
+
+        <section class="mth-sec">
+          <h3><i data-lucide="shapes"></i> Feature breakdowns</h3>
+          <p>Edits are also grouped by what was mapped, using the element's main tag: buildings, highways, waterways,
+            landuse, natural features, amenities, and points of interest. Each shows
+            <span class="mth-tok">+ created</span> and <span class="mth-tok">~ modified</span>.</p>
+        </section>
+
+        <section class="mth-sec">
+          <h3><i data-lucide="ruler"></i> Length (km)</h3>
+          <p>For line features, the length shown is the distance of the ways drawn when they were created,
+            added up. Only open lines are measured. Closed shapes (buildings, areas, and closed loops such as
+            roundabouts) have no length, so they show no km. This is why some line features show km and areas do
+            not.</p>
+        </section>
+
+        <section class="mth-sec">
+          <h3><i data-lucide="hash"></i> Hashtags</h3>
+          <p>Hashtags are matched by prefix, so <code>osmnepal</code> also includes
+            <code>osmnepal-project-123</code> and similar. Add several hashtags to combine them: a changeset that
+            carries any of them is included, and each changeset is counted once even if it uses more than one.</p>
+        </section>
+
+        <section class="mth-sec">
+          <h3><i data-lucide="clock"></i> Time window and freshness</h3>
+          <p>All times are in UTC. Past months come from a published dataset that is complete, and the most recent
+            days come from a live feed that updates every few minutes. The Updated label shows how current the
+            live feed is.</p>
+        </section>
+
+        <section class="mth-sec">
+          <h3><i data-lucide="database"></i> Where the data comes from</h3>
+          <p>The numbers are built from OpenStreetMap's own edit history (replication feeds). Full method and code:</p>
+          <p class="mth-links">
+            <a href="https://github.com/osgeonepal/osmsg" target="_blank" rel="noopener"><i data-lucide="github"></i>
+              Source code</a>
+            <a href="https://github.com/osgeonepal/osmsg/blob/master/docs/Manual.md" target="_blank"
+              rel="noopener"><i data-lucide="book-open"></i> Manual</a>
+            <a href="https://www.openstreetmap.org" target="_blank" rel="noopener"><i data-lucide="map"></i>
+              OpenStreetMap</a>
+          </p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="footer-inner">
+      <div>
+        <div class="text-ink-2 font-medium mb-1">OSMSG · OSM Stats Generator</div>
+        <div>An <a href="https://osgeonepal.org" target="_blank" rel="noopener">OSGeo Nepal</a> project |
+          Funded by <a href="https://osmfoundation.org/" target="_blank" rel="noopener">OSM Foundation</a></div>
+      </div>
+      <div class="footer-links">
+        <a href="#methodology" id="methodology-link"><i data-lucide="calculator"></i> How stats work</a>
+        <a href="https://github.com/osgeonepal/osmsg" target="_blank" rel="noopener"><i data-lucide="github"></i>
+          GitHub</a>
+        <a id="api-docs-link" href="/docs/swagger" target="_blank" rel="noopener"><i data-lucide="cloud"></i>
+          API docs</a>
+        <a href="https://github.com/osgeonepal/osmsg/blob/master/docs/Manual.md" target="_blank" rel="noopener"><i
+            data-lucide="book-open"></i> Manual</a>
+        <a href="https://www.openstreetmap.org" target="_blank" rel="noopener"><i data-lucide="map"></i>
+          OpenStreetMap</a>
+      </div>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="export-progress" class="export-progress" role="status" aria-live="polite" hidden>
+    <div class="ep-label"><i data-lucide="download" class="ico-sm"></i> Building CSV…</div>
+    <div class="ep-bar"><div class="ep-fill" id="export-progress-fill"></div></div>
+    <div class="ep-count" id="export-progress-count"></div>
+  </div>
+  <script src="app.js" defer></script>
+  <script src="charts.js" defer></script>
+</body>
+
+
+</html>
