@@ -825,7 +825,8 @@ def run(cfg: RunConfig) -> dict[str, Any]:
         if urls:
             cs_dir.mkdir(parents=True, exist_ok=True)
             cs_config = _processing_config(cfg, parquet_dir=cs_dir, geom_wkt=geom_wkt)
-            cs_config["window_start_utc"] = cfg.start_date.astimezone(UTC)
+
+            cs_config["window_start_utc"] = None if cfg.update else cfg.start_date.astimezone(UTC)
 
             _stream_download_process(
                 urls,

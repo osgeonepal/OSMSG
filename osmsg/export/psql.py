@@ -220,16 +220,16 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
             _push_chunked(conn, "changeset_stats", _push_changeset_stats)
             _push_chunked(conn, "changesets", _push_changeset_hashtags)
         elif _pg_has_history(conn):
-            live_ids = "changeset_id IN (SELECT changeset_id FROM changeset_stats WHERE seq_id <> 0)"
+            not_history = "changeset_id NOT IN (SELECT changeset_id FROM changeset_stats WHERE seq_id = 0)"
             conn.execute(
                 "INSERT INTO pg_target.users SELECT * FROM users "
                 "WHERE uid IN (SELECT uid FROM changeset_stats WHERE seq_id <> 0) ON CONFLICT DO NOTHING"
             )
             # Chunked like the bulk path: one INSERT of the whole live tail exceeds the worker's memory
             # once the tail grows to a month; per-range commits keep peak memory to a single chunk.
-            _push_chunked(conn, "changesets", _push_changesets, live_ids)
+            _push_chunked(conn, "changesets", _push_changesets, not_history)
             _push_chunked(conn, "changeset_stats", _push_changeset_stats, "seq_id <> 0")
-            _push_chunked(conn, "changesets", _push_changeset_hashtags, live_ids)
+            _push_chunked(conn, "changesets", _push_changeset_hashtags, not_history)
         else:
             conn.execute("INSERT INTO pg_target.users SELECT * FROM users ON CONFLICT DO NOTHING")
             _push_chunked(conn, "changesets", _push_changesets)
