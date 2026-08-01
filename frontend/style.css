@@ -2838,7 +2838,6 @@ footer {
     max-width: var(--container);
     margin: 0 auto;
     padding: 32px 24px calc(32px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--bd);
     font-size: 13px;
     color: var(--muted);
 }
