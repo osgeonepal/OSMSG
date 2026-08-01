@@ -560,3 +560,41 @@ def test_to_psql_bulk_load_rebuilds_indexes_and_keys(fresh_db, populated_db_fact
     assert stats > 0  # data loaded
     assert orphans == 0  # FK integrity holds after rebuild
     assert fks == 3  # the three foreign keys were recreated
+
+
+class _BoundsStub:
+    """Minimal DuckDB-connection stand-in: the only query _push_chunked runs is the count/min/max
+    bounds probe, so return a fixed tuple for it and record nothing else."""
+
+    def __init__(self, count, lo, hi):
+        self._bounds = (count, lo, hi)
+
+    def execute(self, sql):
+        assert sql.startswith("SELECT count(*), min(changeset_id), max(changeset_id)")
+        return self
+
+    def fetchone(self):
+        return self._bounds
+
+
+def _count_pushes(count, lo, hi):
+    from osmsg.export.psql import _push_chunked
+
+    calls = []
+    _push_chunked(_BoundsStub(count, lo, hi), "changeset_stats", lambda conn, where: calls.append(where))
+    return calls
+
+
+def test_push_chunked_small_delta_uses_single_statement():
+    assert len(_count_pushes(302, 100, 400)) == 1
+
+
+def test_push_chunked_scales_with_row_count_and_caps():
+    from osmsg.export.psql import _BULK_COMMIT_CHUNKS, _CHUNK_TARGET_ROWS
+
+    assert len(_count_pushes(2 * _CHUNK_TARGET_ROWS, 1, 10_000)) == 2
+    assert len(_count_pushes(500 * _CHUNK_TARGET_ROWS, 1, 10**9)) == _BULK_COMMIT_CHUNKS
+
+
+def test_push_chunked_empty_source_pushes_nothing():
+    assert _count_pushes(0, None, None) == []

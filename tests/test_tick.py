@@ -165,3 +165,31 @@ def test_tick_skips_when_previous_tick_holds_lock(tmp_path, monkeypatch, clean_e
         os.close(holder)
 
     assert call_count == 0
+
+
+def test_reset_store_buffer_clears_data_keeps_state(tmp_path):
+    """After a psql push the store keeps only its resume `state`; data tables are emptied so the next
+    push stays a small delta instead of the whole accumulated store."""
+    db_path = tmp_path / "stats.duckdb"
+    conn = connect(str(db_path))
+    create_tables(conn)
+    conn.execute("INSERT INTO users VALUES (1, 'alice')")
+    conn.execute("INSERT INTO changesets (changeset_id, uid, created_at, hashtags) VALUES (7, 1, '2026-08-01', ['#x'])")
+    upsert_state(
+        conn,
+        source_url=SHORTCUTS["minute"],
+        last_seq=123,
+        last_ts=dt.datetime(2026, 8, 1, tzinfo=dt.UTC),
+        updated_at=dt.datetime(2026, 8, 1, tzinfo=dt.UTC),
+    )
+    conn.close()
+
+    _tick._reset_store_buffer(db_path)
+
+    conn = connect(str(db_path))
+    assert conn.execute("SELECT count(*) FROM changesets").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM users").fetchone()[0] == 0
+    assert conn.execute("SELECT count(*) FROM changeset_stats").fetchone()[0] == 0
+    row = conn.execute("SELECT source_url, last_seq FROM state").fetchone()
+    assert row == (SHORTCUTS["minute"], 123)
+    conn.close()

@@ -41,6 +41,18 @@ def _parse_arg(args: list[str], flag: str) -> str | None:
     return None
 
 
+def _reset_store_buffer(db_path: Path) -> None:
+    """Drop the store's data tables and recreate them empty, keeping `state`, so the store holds only
+    the next tick's delta rather than every row pushed since the last reset."""
+    if not db_path.exists():
+        return
+    conn = connect(str(db_path))
+    for table in ("changeset_stats", "changesets", "users"):
+        conn.execute(f"DROP TABLE IF EXISTS {table}")
+    create_tables(conn)
+    conn.close()
+
+
 def main() -> int:
     extra_args = shlex.split(os.environ.get("OSMSG_EXTRA_ARGS", ""))
     bootstrap_days = os.environ.get("OSMSG_BOOTSTRAP_DAYS", "1")
@@ -83,7 +95,13 @@ def main() -> int:
             cmd.extend(["--days", bootstrap_days])
 
         print(f"[osmsg-tick] {' '.join(cmd)}", flush=True)
-        return subprocess.call(cmd)
+        rc = subprocess.call(cmd)
+        # With a psql push, Postgres is the permanent copy and the DuckDB store is only a per-tick
+        # delta buffer. Clear its data (keeping the resume `state`) after a successful push so the store
+        # stays small and the next push stays fast; otherwise it re-pushes the whole growing store each tick.
+        if rc == 0 and _parse_arg(extra_args, "--psql-dsn"):
+            _reset_store_buffer(db_path)
+        return rc
     finally:
         os.close(lock_fd)
 

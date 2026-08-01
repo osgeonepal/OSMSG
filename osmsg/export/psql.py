@@ -62,6 +62,7 @@ def _changeset_bbox_select(conn: duckdb.DuckDBPyConnection) -> str:
 
 
 _BULK_COMMIT_CHUNKS = 32
+_CHUNK_TARGET_ROWS = 45_000
 
 
 def _pg(conn: duckdb.DuckDBPyConnection, sql: str) -> None:
@@ -124,14 +125,19 @@ def _push_changeset_hashtags(conn: duckdb.DuckDBPyConnection, where: str = "") -
 
 def _push_chunked(conn: duckdb.DuckDBPyConnection, source: str, push, extra: str = "") -> None:
     """Call push() once per changeset_id range so each range commits on its own, keeping peak memory to
-    one chunk. `extra` is an extra predicate (no WHERE) ANDed into both the bounds probe and every chunk,
-    so an incremental push chunks only the rows it will actually push."""
+    one chunk. The chunk count scales with the row count (one commit per ~_CHUNK_TARGET_ROWS rows, capped
+    at _BULK_COMMIT_CHUNKS), so a small incremental delta pushes in a single statement instead of paying
+    each DuckDB->PG round-trip's fixed cost 32 times. `extra` is an extra predicate (no WHERE) ANDed into
+    both the bounds probe and every chunk, so an incremental push chunks only the rows it will push."""
     where_extra = f" WHERE {extra}" if extra else ""
-    bounds = conn.execute(f"SELECT min(changeset_id), max(changeset_id) FROM {source}{where_extra}").fetchone()
-    if not bounds or bounds[0] is None:
+    bounds = conn.execute(
+        f"SELECT count(*), min(changeset_id), max(changeset_id) FROM {source}{where_extra}"
+    ).fetchone()
+    if not bounds or bounds[0] == 0 or bounds[1] is None:
         return
-    lo, hi = bounds
-    step = (hi - lo) // _BULK_COMMIT_CHUNKS + 1
+    row_count, lo, hi = bounds
+    chunks = min(_BULK_COMMIT_CHUNKS, max(1, -(-row_count // _CHUNK_TARGET_ROWS)))
+    step = (hi - lo) // chunks + 1
     cursor = lo
     while cursor <= hi:
         rng = f"changeset_id >= {cursor} AND changeset_id < {cursor + step}"
