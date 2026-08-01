@@ -36,6 +36,11 @@ def get_cors_origins() -> list[str]:
     return origins or list(DEFAULT_CORS_ORIGINS)
 
 
+def get_ga_measurement_id() -> str | None:
+    measurement_id = os.getenv("OSMSG_GA_MEASUREMENT_ID", "").strip()
+    return measurement_id or None
+
+
 @asynccontextmanager
 async def lifespan(app: Litestar):
     await open_pool()
@@ -49,7 +54,7 @@ async def lifespan(app: Litestar):
 
 @get("/", include_in_schema=False)
 async def home() -> Template:
-    return Template("home.html")
+    return Template("home.html", context={"ga_measurement_id": get_ga_measurement_id()})
 
 
 def _root_handlers() -> list:
