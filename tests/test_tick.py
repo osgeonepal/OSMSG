@@ -193,3 +193,44 @@ def test_reset_store_buffer_clears_data_keeps_state(tmp_path):
     row = conn.execute("SELECT source_url, last_seq FROM state").fetchone()
     assert row == (SHORTCUTS["minute"], 123)
     conn.close()
+
+
+def test_store_is_dirty_detects_leftover_data(tmp_path):
+    db_path = tmp_path / "stats.duckdb"
+    conn = connect(str(db_path))
+    create_tables(conn)
+    assert _tick._store_is_dirty(db_path) is False
+    conn.execute("INSERT INTO changeset_stats (changeset_id, seq_id, uid) VALUES (1, 5, 9)")
+    conn.close()
+    assert _tick._store_is_dirty(db_path) is True
+
+
+def test_store_is_dirty_false_when_store_missing(tmp_path):
+    assert _tick._store_is_dirty(tmp_path / "absent.duckdb") is False
+
+
+def test_rebuild_store_from_pg_empties_data_and_reseeds_state(tmp_path, monkeypatch):
+    """A dirty store is discarded and rebuilt: data tables empty, resume state taken from Postgres (not
+    the store's own stale, ahead-of-PG state), so --update resumes from the last durably pushed position."""
+    db_path = tmp_path / "stats.duckdb"
+    conn = connect(str(db_path))
+    create_tables(conn)
+    conn.execute("INSERT INTO changeset_stats (changeset_id, seq_id, uid) VALUES (1, 7, 9)")
+    upsert_state(
+        conn,
+        source_url=SHORTCUTS["minute"],
+        last_seq=999,
+        last_ts=dt.datetime(2026, 8, 1, 9, 0, tzinfo=dt.UTC),
+        updated_at=dt.datetime(2026, 8, 1, 9, 0, tzinfo=dt.UTC),
+    )
+    conn.close()
+
+    ts = dt.datetime(2026, 8, 1, 8, 0, tzinfo=dt.UTC)
+    pg_state = [(SHORTCUTS["minute"], 42, ts, ts)]
+    monkeypatch.setattr(_tick, "_read_pg_state", lambda dsn: pg_state)
+    _tick._rebuild_store_from_pg(db_path, "postgresql://ignored")
+
+    conn = connect(str(db_path))
+    assert conn.execute("SELECT count(*) FROM changeset_stats").fetchone()[0] == 0
+    assert conn.execute("SELECT source_url, last_seq FROM state").fetchone() == (SHORTCUTS["minute"], 42)
+    conn.close()

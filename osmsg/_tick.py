@@ -7,7 +7,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .db import connect, create_tables, get_state
+import duckdb
+
+from .db import connect, create_tables, get_state, upsert_state
 from .geofabrik import country_update_url
 from .replication import resolve_url
 
@@ -53,6 +55,60 @@ def _reset_store_buffer(db_path: Path) -> None:
     conn.close()
 
 
+def _read_pg_state(dsn: str) -> list[tuple]:
+    """Read the resume state rows from the Postgres permanent copy (read-only), used to re-seed a rebuilt
+    store. The DSN is interpolated into ATTACH, so it must be trusted (same contract as export.psql)."""
+    conn = duckdb.connect()
+    try:
+        conn.execute("INSTALL postgres")
+        conn.execute("LOAD postgres")
+        safe_dsn = dsn.replace("'", "''")
+        conn.execute(f"ATTACH '{safe_dsn}' AS pg (TYPE postgres, READ_ONLY)")
+        rows = conn.execute("SELECT source_url, last_seq, last_ts, updated_at FROM pg.state").fetchall()
+        conn.execute("DETACH pg")
+    finally:
+        conn.close()
+    return rows
+
+
+def _store_is_dirty(db_path: Path) -> bool:
+    """A psql tick must start from an empty delta buffer (the last successful push reset it). Leftover data
+    means the previous push was interrupted, and the abrupt stop can also leave the store's index corrupt.
+    An unreadable store is treated as dirty so it gets rebuilt rather than crashing the run."""
+    if not db_path.exists():
+        return False
+    try:
+        conn = connect(str(db_path))
+    except duckdb.Error:
+        return True
+    try:
+        create_tables(conn)
+        row = conn.execute("SELECT count(*) FROM changeset_stats").fetchone()
+        return bool(row) and row[0] > 0
+    except duckdb.Error:
+        return True
+    finally:
+        conn.close()
+
+
+def _rebuild_store_from_pg(db_path: Path, dsn: str) -> None:
+    """Discard a dirty or corrupt delta buffer and rebuild it fresh, re-seeding the resume state from the
+    Postgres permanent copy so `--update` continues from the last durably pushed position: no gap, no
+    double-count (the push is ON CONFLICT DO NOTHING), and a clean index. This is the automatic recovery
+    that replaces manual store surgery after an interrupted push."""
+    pg_state = _read_pg_state(dsn)
+    for path in (db_path, db_path.with_name(db_path.name + ".wal")):
+        if path.exists():
+            path.unlink()
+    conn = connect(str(db_path))
+    try:
+        create_tables(conn)
+        for source_url, last_seq, last_ts, updated_at in pg_state:
+            upsert_state(conn, source_url=source_url, last_seq=last_seq, last_ts=last_ts, updated_at=updated_at)
+    finally:
+        conn.close()
+
+
 def main() -> int:
     extra_args = shlex.split(os.environ.get("OSMSG_EXTRA_ARGS", ""))
     bootstrap_days = os.environ.get("OSMSG_BOOTSTRAP_DAYS", "1")
@@ -78,6 +134,12 @@ def main() -> int:
         # otherwise --update can't find the state row and the DuckDB gets wiped every tick.
         source_url = country_update_url(country) if country and explicit_url is None else resolve_url(url)
         db_path = out / f"{name}.duckdb"
+        psql_dsn = _parse_arg(extra_args, "--psql-dsn")
+
+        # Self-heal
+        if psql_dsn and _store_is_dirty(db_path):
+            print("[osmsg-tick] store dirty from an interrupted push; rebuilding from Postgres state", flush=True)
+            _rebuild_store_from_pg(db_path, psql_dsn)
 
         extra_set = set(extra_args)
         cmd = ["osmsg"] + extra_args
@@ -99,7 +161,7 @@ def main() -> int:
         # With a psql push, Postgres is the permanent copy and the DuckDB store is only a per-tick
         # delta buffer. Clear its data (keeping the resume `state`) after a successful push so the store
         # stays small and the next push stays fast; otherwise it re-pushes the whole growing store each tick.
-        if rc == 0 and _parse_arg(extra_args, "--psql-dsn"):
+        if rc == 0 and psql_dsn:
             _reset_store_buffer(db_path)
         return rc
     finally:
