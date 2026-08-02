@@ -178,7 +178,7 @@ def ingest_remote(
         )
     if filters.users_filter:
         names = ", ".join(f"'{u}'" for u in filters.users_filter)
-        changeset_preds.append(f"uid IN (SELECT uid FROM users WHERE username IN ({names}))")
+        changeset_preds.append(f"username IN ({names})")
     changeset_where = " AND ".join(changeset_preds)
 
     stats_preds = [in_window]
@@ -193,17 +193,23 @@ def ingest_remote(
         changefiles_src = _partition_list(history_url, "changefiles", [month])
         if changesets_src is not None:
             conn.execute(
-                f"""INSERT INTO users
-                    SELECT uid, any_value(username) FROM {changesets_src}
-                    WHERE {in_window} AND username IS NOT NULL
+                f"""CREATE OR REPLACE TEMP TABLE _remote_cs_month AS
+                    SELECT changeset_id, uid, username, created_at, hashtags, editor,
+                            min_lon, min_lat, max_lon, max_lat
+                    FROM {changesets_src} WHERE {changeset_where}"""
+            )
+            conn.execute(
+                """INSERT INTO users
+                    SELECT uid, any_value(username) FROM _remote_cs_month
+                    WHERE username IS NOT NULL
                     GROUP BY uid ON CONFLICT (uid) DO NOTHING"""
             )
             conn.execute(
-                f"""INSERT INTO changesets
+                """INSERT INTO changesets
                     SELECT changeset_id, uid, created_at, hashtags, editor,
-                           CASE WHEN min_lon IS NOT NULL
+                            CASE WHEN min_lon IS NOT NULL
                                 THEN ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat) END
-                    FROM {changesets_src} WHERE {changeset_where}
+                    FROM _remote_cs_month
                     ON CONFLICT (changeset_id) DO NOTHING"""
             )
         if changefiles_src is not None:
@@ -211,11 +217,11 @@ def ingest_remote(
             conn.execute(
                 f"""INSERT INTO changeset_stats
                     SELECT changeset_id, {HISTORY_SEQ_ID} AS seq_id, uid,
-                           nodes_created, nodes_modified, nodes_deleted,
-                           ways_created, ways_modified, ways_deleted,
-                           rels_created, rels_modified, rels_deleted,
-                           poi_created, poi_modified,
-                           COALESCE(tags, []::{TAG_STRUCT_DDL}[]) AS tags
+                            nodes_created, nodes_modified, nodes_deleted,
+                            ways_created, ways_modified, ways_deleted,
+                            rels_created, rels_modified, rels_deleted,
+                            poi_created, poi_modified,
+                            COALESCE(tags, []::{TAG_STRUCT_DDL}[]) AS tags
                     FROM {changefiles_src} WHERE {stats_where}
                     ON CONFLICT (seq_id, changeset_id) DO NOTHING"""
             )
@@ -233,6 +239,7 @@ def ingest_remote(
                     time.sleep(min(60, 5 * 2**attempt))
             advance()
 
+    conn.execute("DROP TABLE IF EXISTS _remote_cs_month")
     row = conn.execute(f"SELECT count(*) FROM changeset_stats WHERE seq_id = {HISTORY_SEQ_ID}").fetchone()
     return row[0] if row else 0
 
