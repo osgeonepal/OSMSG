@@ -2,8 +2,9 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from litestar import Litestar, get
+from litestar import Litestar, Request, get
 from litestar.config.cors import CORSConfig
+from litestar.middleware.rate_limit import RateLimitConfig
 from litestar.openapi.config import OpenAPIConfig
 from litestar.openapi.plugins import SwaggerRenderPlugin
 from litestar.response import Redirect
@@ -31,6 +32,27 @@ def get_cors_origins() -> list[str]:
     raw_origins = os.getenv("OSMSG_CORS_ORIGINS", "")
     origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
     return origins or list(DEFAULT_CORS_ORIGINS)
+
+
+def _client_identifier(request: Request) -> str:
+    """Rate-limit key. Behind the reverse proxy the socket peer is the proxy, so key on the last
+    X-Forwarded-For hop, the address Caddy appends, which a client-supplied header cannot spoof."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+        if hops:
+            return hops[-1]
+    return request.client.host if request.client else "unknown"
+
+
+# Generous per-IP cap: a NAT'd mapathon shares one address, so this only stops a single flooder; the
+# DuckDB pool 429 in duck.py is the global load-shed.
+_RATE_LIMIT_PER_MINUTE = int(os.getenv("OSMSG_RATE_LIMIT_PER_MINUTE", "120"))
+rate_limit_config = RateLimitConfig(
+    rate_limit=("minute", _RATE_LIMIT_PER_MINUTE),
+    exclude=["/health", "/docs", "/schema"],
+    identifier_for_request=_client_identifier,
+)
 
 
 @asynccontextmanager
@@ -75,6 +97,7 @@ async def health() -> HealthResponse:
 app = Litestar(
     route_handlers=[*_root_handlers(), health, v2_router],
     lifespan=[lifespan],
+    middleware=[rate_limit_config.middleware],
     cors_config=CORSConfig(
         allow_origins=get_cors_origins(),
         allow_methods=["GET", "OPTIONS"],

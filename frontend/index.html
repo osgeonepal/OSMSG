@@ -232,6 +232,10 @@
             added up. Only open lines are measured. Closed shapes (buildings, areas, and closed loops such as
             roundabouts) have no length, so they show no km. This is why some line features show km and areas do
             not.</p>
+          <p>A line can only be measured when the coordinates of all its points are present as it is read.
+            A line drawn onto pre-existing points is skipped, so its kilometres are not counted. The length
+            total is therefore a lower bound and can read below tools that rebuild the full geometry of each
+            way. The gap is larger where new lines connect into existing data, such as city streets.</p>
         </section>
 
         <section class="mth-sec">

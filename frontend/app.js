@@ -42,6 +42,7 @@ const state = {
   status: "loading",
   refreshTimer: null,
   agoTimer: null,
+  healthTimer: null,
   clockTimer: null,
   inflight: null,
   page: 1,
@@ -1627,6 +1628,9 @@ function boot() {
   // the user presses Extract to trigger it, so a shared or bookmarked link cannot flood the API.
   showEmptyPrompt();
   state.agoTimer = setInterval(updateLastUpdated, 5000);
+  // Re-poll only the server status (cheap /health), never the query data, so the freshness label
+  // reflects the worker advancing without touching the leaderboard or hitting the query endpoints.
+  state.healthTimer = setInterval(fetchHealth, 120000);
   state.clockTimer = setInterval(() => {
     $("#wb-localtime").textContent = dtfClock.format(new Date());
   }, 1000);

@@ -15,8 +15,10 @@ import time
 from urllib.parse import urlparse
 
 import duckdb
+from litestar.exceptions import TooManyRequestsException
 
 from osmsg import query
+from osmsg.db.schema import _apply_runtime_pragmas
 from osmsg.history import fetch_manifest
 from osmsg.query import Sources
 
@@ -25,6 +27,8 @@ _PG_ATTACH = "pg"
 # Warm connections (extensions + Postgres attached) reused across requests so cold-start is paid once;
 # the pool size caps concurrency, so heavy queries queue instead of thrashing the CPU.
 _POOL_SIZE = int(os.getenv("OSMSG_DUCKDB_POOL", "3"))
+# Max wait for a free slot before shedding with 429 (see _acquire).
+_POOL_WAIT = float(os.getenv("OSMSG_POOL_WAIT_SECONDS", "8"))
 # Above the slowest legitimate query; a watchdog interrupts anything past it so a disconnected client or
 # runaway cannot pin a core.
 _QUERY_TIMEOUT = float(os.getenv("OSMSG_QUERY_TIMEOUT_SECONDS", "150"))
@@ -72,6 +76,8 @@ def _connect() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs; INSTALL json; LOAD json; INSTALL postgres; LOAD postgres;")
     con.execute("SET http_retries=10;")
+    # Memory/temp pragmas so concurrent pooled queries cannot sum past the container memory cap.
+    _apply_runtime_pragmas(con)
     con.execute(f"ATTACH '{_libpq_dsn()}' AS pg (TYPE postgres, READ_ONLY)")
     return con
 
@@ -88,7 +94,7 @@ def _sources() -> Sources:
     )
 
 
-def _pool_get() -> duckdb.DuckDBPyConnection:
+def _pool_ready() -> queue.Queue:
     global _pool
     if _pool is None:
         with _pool_lock:
@@ -97,13 +103,23 @@ def _pool_get() -> duckdb.DuckDBPyConnection:
                 for _ in range(_POOL_SIZE):
                     warm.put(_connect())
                 _pool = warm
-    return _pool.get()
+    return _pool
+
+
+def _acquire(pool: queue.Queue) -> duckdb.DuckDBPyConnection:
+    """Borrow a warm connection, waiting at most _POOL_WAIT for a free slot. Past that the box is saturated,
+    so shed the request with 429 instead of queueing to the watchdog timeout or stacking toward an OOM."""
+    try:
+        return pool.get(timeout=_POOL_WAIT)
+    except queue.Empty:
+        raise TooManyRequestsException(detail="Server at capacity; retry shortly.") from None
 
 
 def _run(fn, hashtag, **kwargs):
-    """Borrow a warm pooled connection (blocking past the pool size caps concurrency), run under a watchdog
-    that interrupts a query past _QUERY_TIMEOUT, and return it (replaced if it errored or was interrupted)."""
-    con = _pool_get()
+    """Borrow a warm pooled connection (429 past _POOL_WAIT caps concurrency), run under a watchdog that
+    interrupts a query past _QUERY_TIMEOUT, and return it (replaced if it errored or was interrupted)."""
+    pool = _pool_ready()
+    con = _acquire(pool)
     done = threading.Event()
 
     def _watchdog() -> None:
@@ -122,13 +138,12 @@ def _run(fn, hashtag, **kwargs):
     finally:
         done.set()
         watcher.join()  # ensure no interrupt is still pending before the connection is reused
-        assert _pool is not None
         if healthy:
-            _pool.put(con)
+            pool.put(con)
         else:
             with contextlib.suppress(duckdb.Error):
                 con.close()
-            _pool.put(_connect())
+            pool.put(_connect())
 
 
 async def summary(hashtag: str | list[str], *, start: dt.datetime | None = None, end: dt.datetime | None = None):

@@ -141,7 +141,10 @@ def main(
         typer.Option("--hashtags", help="Hashtag filter (substring by default; whole-word with --exact-lookup)."),
     ] = None,
     tags: Annotated[list[str] | None, typer.Option("--tags", help="Per-key counts (e.g. building highway).")] = None,
-    length: Annotated[list[str] | None, typer.Option("--length", help="Length-in-m for tag keys.")] = None,
+    length: Annotated[
+        list[str] | None,
+        typer.Option("--length", help="Length-in-m for tag keys (lower bound: ways on pre-existing nodes skipped)."),
+    ] = None,
     users: Annotated[
         list[str] | None,
         typer.Option("--users", help="Filter to OSM usernames (case-sensitive, exact match). Repeat for more."),

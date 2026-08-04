@@ -55,7 +55,7 @@ osmsg --boundary '{"type":"Polygon",...}'     # inline GeoJSON string
 
 ```bash
 osmsg --tags building --tags highway           # per-key create/modify counts
-osmsg --length highway --length waterway       # length in metres for created ways
+osmsg --length highway --length waterway       # length in metres for created ways (lower bound, see docs/length_backfill.md)
 osmsg --keys                                   # every tag key (no value breakdown)
 osmsg --all                                    # every key=value combo + changeset metadata (hashtags, editors)
 ```

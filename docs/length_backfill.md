@@ -16,11 +16,29 @@ Geometry source: osmium's node index keeps each node's first-seen coordinates, s
 with near-creation-time geometry. On a sample of real ways this sits within about 2% of the exact
 creation-time length in aggregate.
 
+## Accuracy: length is a lower bound
+
+Measuring an open way needs the coordinates of every node it references. A diff carries coordinates
+only for nodes touched in that diff, so a way that connects to a pre-existing node (a junction it was
+drawn onto) has an unresolved node. osmium raises `InvalidLocationError` for the whole way and it is
+skipped, contributing zero length. The reported length is therefore a lower bound of the true
+geometry length.
+
+The gap depends on how much new geometry connects into existing data. Remote greenfield lines, whose
+nodes are all new in the same diff, are measured almost completely; urban lines wired into existing
+streets lose more. Against full-geometry tools such as ohsome, osmsg highway kilometres run below
+their road length, and by a wider margin for urban work. This is a definitional lower bound, not a
+scaling error.
+
+The only path that resolves pre-existing nodes is the full-planet single pass in the History backfill
+section below, which builds a global node index. The live tick and the monthly `maintain month`
+append both read diffs and share this lower-bound behaviour.
+
 ## Live path
 
 The worker computes length on every tick: it applies changefiles with node locations on, and measures
 open-way creates whose nodes are present in the same diff. A way whose nodes come from an earlier diff
-has no location in the current diff and is skipped; the history backfill measures those.
+has no location in the current diff and is skipped.
 
 ## History backfill
 
