@@ -48,6 +48,13 @@ def _rows(result) -> list[dict[str, Any]]:
     return [dict(zip(cols, r, strict=True)) for r in result.fetchall()]
 
 
+def _like_escape(value: str) -> str:
+    """Escape LIKE metacharacters so a contributor search matches them literally. Without this `_`
+    matches any character and `%` any sequence, so searching `a_il` returns `Anil` and `%` returns
+    everyone. Paired with `ESCAPE '\\'` at the call site."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _prefixes(hashtag: str | list[str]) -> list[tuple[str, str]]:
     """Normalize one hashtag or many into deduped `(lo, hi)` prefix-range pairs, case-insensitive and
     order-preserving. Each hashtag matches as a prefix; the scope is the union across them."""
@@ -412,8 +419,8 @@ def leaderboard(
     rrel, rp = _recent_leaderboard(s, prefixes, start, end)
     search_pred, search_params = "", []
     if q:
-        search_pred = " WHERE lower(name) LIKE ?"
-        search_params = [f"%{q.strip().lower()}%"]
+        search_pred = " WHERE lower(name) LIKE ? ESCAPE '\\'"
+        search_params = [f"%{_like_escape(q.strip().lower())}%"]
     con.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE _lb_agg AS

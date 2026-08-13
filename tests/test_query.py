@@ -87,6 +87,14 @@ def test_leaderboard_page_size_and_sort(con, sources):
     assert found["total"] == 1 and found["items"][0]["name"] == "alice"
 
 
+def test_leaderboard_search_escapes_like_wildcards(con, sources):
+    # `_` and `%` are LIKE metacharacters: unescaped, `a_ice` matched `alice` and a bare `%` returned
+    # every contributor. They must match literally.
+    assert query.leaderboard(con, "hotosm", sources, q="ali")["total"] == 1
+    assert query.leaderboard(con, "hotosm", sources, q="a_ice")["total"] == 0
+    assert query.leaderboard(con, "hotosm", sources, q="%")["total"] == 0
+
+
 def test_leaderboard_includes_per_user_tag_stats(con, sources):
     # The frontend reads per-user `tag_stats` (nested {key: {value: {c, m}}}) to show building/highway
     # per contributor; regression guard that leaderboard rows carry it across the history+recent seam.
