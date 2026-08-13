@@ -331,7 +331,8 @@ def _attach_user_hashtags(
     else:
         recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
         recent = (
-            f"SELECT uid, h AS hashtag FROM (SELECT uid, UNNEST(hashtags) AS h FROM {s.recent_changesets_rel} "
+            f"SELECT uid, lower(h) AS hashtag FROM (SELECT uid, UNNEST(hashtags) AS h "
+            f"FROM {s.recent_changesets_rel} "
             f"WHERE created_at >= ?{window_sql} AND uid IN ({ph}) "
             f"AND EXISTS (SELECT 1 FROM UNNEST(hashtags) AS t(x) WHERE {recent_pred}))"
         )
@@ -585,7 +586,7 @@ def hashtags(
     else:
         recent_match = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
         parts.append(
-            f"SELECT h AS hashtag, uid, mc FROM (SELECT c.uid, UNNEST(c.hashtags) AS h, cs.mc AS mc "
+            f"SELECT lower(h) AS hashtag, uid, mc FROM (SELECT c.uid, UNNEST(c.hashtags) AS h, cs.mc AS mc "
             f"FROM {s.recent_changesets_rel} c JOIN (SELECT changeset_id, {map_changes_sum(alias='mc')} "
             f"FROM {s.recent_stats_rel} GROUP BY changeset_id) cs USING (changeset_id) "
             f"WHERE c.created_at >= ?{window_sql} AND EXISTS "

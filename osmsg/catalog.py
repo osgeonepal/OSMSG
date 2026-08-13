@@ -198,7 +198,7 @@ def recent_user_hashtags(attach, uids: list[int], *, prefixes, frontier, start=N
     uid_list = ", ".join(str(int(u)) for u in uids)
     ranges = " OR ".join(f"(lower(h) >= {_pg_str(lo)} AND lower(h) < {_pg_str(hi)})" for lo, hi in prefixes)
     inner = (
-        f"SELECT DISTINCT s.uid AS uid, h AS hashtag "
+        f"SELECT DISTINCT s.uid AS uid, lower(h) AS hashtag "
         f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
         f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} AND ({ranges})"
     )
@@ -211,7 +211,7 @@ def recent_user_cooccur_hashtags(attach, uids: list[int], *, prefixes, frontier,
     uid_list = ", ".join(str(int(u)) for u in uids)
     ranges = " OR ".join(f"(lower(x) >= {_pg_str(lo)} AND lower(x) < {_pg_str(hi)})" for lo, hi in prefixes)
     inner = (
-        f"SELECT DISTINCT s.uid AS uid, h AS hashtag "
+        f"SELECT DISTINCT s.uid AS uid, lower(h) AS hashtag "
         f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
         f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} "
         f"AND EXISTS (SELECT 1 FROM unnest(c.hashtags) AS x WHERE {ranges})"
