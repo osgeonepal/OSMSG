@@ -127,6 +127,31 @@ def test_cooccurring_hashtags(con, sources):
     ]
 
 
+def _tag_written_both_ways(con) -> None:
+    """The same hashtag as the two sides really store it: the rollup lowercases, while the base
+    `changesets` table keeps the case the mapper typed."""
+    con.execute("INSERT INTO history SELECT '#youthmappers', * EXCLUDE (hashtag) FROM history WHERE changeset_id = 1")
+    con.execute("UPDATE csets SET hashtags = list_append(hashtags, '#YouthMappers') WHERE changeset_id = 3")
+
+
+def test_cooccurring_hashtags_merge_case_variants(con, sources):
+    # Grouping is on the raw string, so a tag written both ways used to come back as two rows, each
+    # holding only part of the contributors. Both sides lowercase before grouping.
+    _tag_written_both_ways(con)
+    tags = [r["hashtag"] for r in query.hashtags(con, "hotosm", sources)]
+    assert "#YouthMappers" not in tags
+    assert tags.count("#youthmappers") == 1
+
+
+def test_leaderboard_cooccurring_hashtags_merge_case_variants(con, sources):
+    # Same split on the per-user chips: alice carries the tag from history and from the recent tail.
+    _tag_written_both_ways(con)
+    items = query.leaderboard(con, "hotosm", sources)["items"]
+    alice = next(r for r in items if r["name"] == "alice")
+    assert "#YouthMappers" not in alice["hashtags"]
+    assert alice["hashtags"].count("#youthmappers") == 1
+
+
 def test_tags_breakdown(con, sources):
     tg = query.tags(con, "hotosm", sources)
     building = next(r for r in tg if r["tag_key"] == "building")
