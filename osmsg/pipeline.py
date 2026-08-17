@@ -102,6 +102,7 @@ class RunConfig:
     osh_file: str | None = None
     changeset_file: str | None = None
     overwrite: bool = False
+    store_only: bool = False
 
 
 def _resolve_country_urls(countries: list[str]) -> list[str]:
@@ -690,6 +691,9 @@ def run(cfg: RunConfig) -> dict[str, Any]:
         existing = dbmod.connect(str(db_path))
         if _read_fingerprint(existing) == fingerprint:
             info(f"Reusing {db_path} (same query); re-exporting. Pass --overwrite to recompute.")
+            if cfg.store_only:
+                dbmod.close(existing)
+                return {"db_path": str(db_path)}
             start_utc = (cfg.start_date or cfg.end_date).astimezone(UTC)
             return _finalize(
                 cfg,
@@ -944,6 +948,11 @@ def run(cfg: RunConfig) -> dict[str, Any]:
         start_date_utc = min(ts for ts, _seq in url_starts.values()).astimezone(UTC)
     else:
         start_date_utc = cfg.start_date.astimezone(UTC)
+
+    if cfg.store_only:
+        _store_fingerprint(conn, fingerprint)
+        dbmod.close(conn)
+        return {"db_path": str(db_path)}
 
     return _finalize(
         cfg,

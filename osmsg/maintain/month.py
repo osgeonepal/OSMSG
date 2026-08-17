@@ -8,6 +8,7 @@ import subprocess
 
 import duckdb
 
+from ..db.schema import _apply_runtime_pragmas
 from ..exceptions import OsmsgError
 from .parquet import GEOM_COLS, MORTON_MACROS, write_partitions
 
@@ -69,6 +70,11 @@ def generate_month(year: int, month: int, work: pathlib.Path) -> pathlib.Path:
             history_mode="off",
             formats=["parquet"],
             output_dir=work,
+            store_only=True,
+            delete_temp=True,
+            # One parse worker so only a single day-diff (its stats + osmium node-location index) is resident
+            # at a time, keeping a month's build within a small-box memory budget. DuckDB still uses all cores.
+            workers=1,
         )
     )
     return work / f"{name}.duckdb"
@@ -78,6 +84,7 @@ def export_month(db: pathlib.Path, year: int, month: int, out: pathlib.Path) -> 
     """Export the month's changefiles/changesets partitions, Morton-sorted, and return their row counts."""
     con = duckdb.connect()
     con.execute("INSTALL spatial; LOAD spatial; INSTALL json; LOAD json;")
+    _apply_runtime_pragmas(con)
     con.execute(MORTON_MACROS)
     con.execute(f"ATTACH '{db}' AS m (READ_ONLY)")
     where = f"year(c.created_at)={year} AND month(c.created_at)={month}"

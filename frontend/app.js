@@ -456,6 +456,8 @@ $$(".preset button").forEach(
 // Server sort names differ from the table's column keys in one spot.
 const SERVER_SORT = { username: "name", map_changes: "map_changes", created: "created", modified: "modified", deleted: "deleted", changesets: "changesets" };
 const LEADERBOARD_TIMEOUT_MS = 130_000;
+const BUSY_RETRIES = 1;
+const BUSY_BACKOFF_MS = 2500;
 
 function endpoint(name, params) {
   const base = `/api/v2/hashtag/${encodeURIComponent(state.hashtags.join(","))}/${name}`;
@@ -463,10 +465,28 @@ function endpoint(name, params) {
   params.forEach((v, k) => u.searchParams.set(k, v));
   return u;
 }
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+  });
+}
 async function apiGet(name, params, signal) {
-  const res = await fetch(endpoint(name, params), { headers: { accept: "application/json" }, mode: "cors", signal });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText || ""}`.trim());
-  return res.json();
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(endpoint(name, params), { headers: { accept: "application/json" }, mode: "cors", signal });
+    if (res.status === 429) {
+      if (attempt < BUSY_RETRIES) {
+        await sleep(BUSY_BACKOFF_MS, signal);
+        continue;
+      }
+      const err = new Error("Server is busy");
+      err.busy = true;
+      throw err;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText || ""}`.trim());
+    return res.json();
+  }
 }
 // Resolve the window once per query so all sections and the window bar share one [start, end); relative
 // ranges like 30d must not each recompute "now".
@@ -605,7 +625,13 @@ async function runQuery() {
     state.tagRows = tags;
     renderOverviewDetails();
   } catch (err) {
-    if (err?.name !== "AbortError") console.warn("OSMSG query failed:", err);
+    if (err?.name !== "AbortError") {
+      console.warn("OSMSG query failed:", err);
+      if (err?.busy && alive()) {
+        showError(err);
+        $("#ov-strip-totals").innerHTML = "";
+      }
+    }
   } finally {
     releasePrimary();
     if (alive()) {
@@ -1393,6 +1419,16 @@ function showLoading() {
 }
 function showError(err) {
   const tb = $("#lb-body");
+  if (err?.busy) {
+    tb.innerHTML = `<tr><td colspan="8"><div class="errbox">
+      <i data-lucide="hourglass"></i>
+      <h3>Server is busy right now</h3>
+      <p style="margin-top:8px;color:#717D78">Too many queries are running at once. Give it a moment, then hit Search again.</p>
+    </div></td></tr>`;
+    $("#pagination").hidden = true;
+    refreshIcons(tb);
+    return;
+  }
   const msg = err?.message || "Network error";
   const isAbort = err?.name === "AbortError";
   tb.innerHTML = `<tr><td colspan="8"><div class="errbox">

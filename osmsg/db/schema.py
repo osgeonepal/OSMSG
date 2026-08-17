@@ -26,6 +26,8 @@ def _apply_runtime_pragmas(conn: duckdb.DuckDBPyConnection) -> None:
     if temp_directory:
         os.makedirs(temp_directory, exist_ok=True)
         conn.execute(f"SET temp_directory='{temp_directory.replace(chr(39), chr(39) * 2)}'")
+    if os.environ.get("OSMSG_DUCKDB_PRESERVE_ORDER", "").lower() in {"false", "0", "no"}:
+        conn.execute("SET preserve_insertion_order=false")
 
 
 def connect(db_path: str) -> duckdb.DuckDBPyConnection:

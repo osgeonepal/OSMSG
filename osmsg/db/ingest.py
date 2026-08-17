@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -112,6 +113,29 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
+# Target changesets per merge chunk. A per-tick delta is one chunk (unchanged behaviour); a month-sized
+# merge splits into many so each INSERT/UPDATE stays memory-bounded instead of rewriting all rows at once.
+_MERGE_CHUNK_ROWS = 200_000
+_MERGE_CHUNK_CAP = 64
+
+
+def _id_ranges(conn: duckdb.DuckDBPyConnection, shard_glob: str) -> list[tuple[int, int]]:
+    """Adaptive [low, high) changeset_id ranges over the shards: one range covering everything for a small
+    merge, several for a large one. Splitting by changeset_id is exact for DISTINCT ON (changeset_id), a
+    changeset's rows share one id and land in exactly one range."""
+    row = conn.execute(
+        f"SELECT count(*), min(changeset_id), max(changeset_id) FROM read_parquet('{shard_glob}')"
+    ).fetchone()
+    count, low, high = row if row else (0, 0, 0)
+    if not count:
+        return []
+    chunk_count = max(1, min(_MERGE_CHUNK_CAP, math.ceil(count / _MERGE_CHUNK_ROWS)))
+    if chunk_count == 1:
+        return [(low, high + 1)]
+    width = math.ceil((high - low + 1) / chunk_count)
+    return [(low + i * width, min(high + 1, low + (i + 1) * width)) for i in range(chunk_count)]
+
+
 def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, cleanup: bool = True) -> None:
     parquet_dir = Path(parquet_dir)
     if not parquet_dir.exists():
@@ -132,57 +156,65 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
         if any(parquet_dir.glob("temp_*_changesets_*.parquet")):
             conn.execute("INSTALL spatial")
             conn.execute("LOAD spatial")
-            conn.execute(
-                f"""
-                INSERT OR IGNORE INTO changesets
-                SELECT changeset_id, uid, created_at, hashtags, editor,
-                       CASE WHEN min_lon IS NOT NULL
-                           THEN ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat)
-                       END
-                FROM read_parquet('{pattern("changesets")}')
-                """
-            )
-            # Newer non-NULL wins; dedupe src so multiple emits per window don't trip the PK on UPDATE.
-            conn.execute(
-                f"""
-                UPDATE changesets c
-                SET created_at = COALESCE(src.created_at, c.created_at),
-                    hashtags   = COALESCE(src.hashtags,   c.hashtags),
-                    editor     = COALESCE(src.editor,     c.editor),
-                    geom       = COALESCE(src.geom,       c.geom)
-                FROM (
-                    SELECT DISTINCT ON (changeset_id)
-                           changeset_id, created_at, hashtags, editor,
+            shard_glob = pattern("changesets")
+            for low, high in _id_ranges(conn, shard_glob):
+                id_range = f"changeset_id >= {low} AND changeset_id < {high}"
+                conn.execute(
+                    f"""
+                    INSERT OR IGNORE INTO changesets
+                    SELECT changeset_id, uid, created_at, hashtags, editor,
                            CASE WHEN min_lon IS NOT NULL
                                THEN ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat)
-                           END AS geom
-                    FROM read_parquet('{pattern("changesets")}')
-                    ORDER BY changeset_id,
-                             (min_lon IS NOT NULL) DESC,
-                             (editor IS NOT NULL)  DESC,
-                             (hashtags IS NOT NULL) DESC,
-                             created_at DESC NULLS LAST
-                ) src
-                WHERE c.changeset_id = src.changeset_id
-                  AND (src.created_at IS NOT NULL OR src.hashtags IS NOT NULL
-                       OR src.editor IS NOT NULL OR src.geom IS NOT NULL)
-                """
-            )
+                           END
+                    FROM read_parquet('{shard_glob}')
+                    WHERE {id_range}
+                    """
+                )
+                # Newer non-NULL wins; dedupe src so multiple emits per window don't trip the PK on UPDATE.
+                conn.execute(
+                    f"""
+                    UPDATE changesets c
+                    SET created_at = COALESCE(src.created_at, c.created_at),
+                        hashtags   = COALESCE(src.hashtags,   c.hashtags),
+                        editor     = COALESCE(src.editor,     c.editor),
+                        geom       = COALESCE(src.geom,       c.geom)
+                    FROM (
+                        SELECT DISTINCT ON (changeset_id)
+                               changeset_id, created_at, hashtags, editor,
+                               CASE WHEN min_lon IS NOT NULL
+                                   THEN ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat)
+                                   END AS geom
+                        FROM read_parquet('{shard_glob}')
+                        WHERE {id_range}
+                        ORDER BY changeset_id,
+                                 (min_lon IS NOT NULL) DESC,
+                                 (editor IS NOT NULL)  DESC,
+                                 (hashtags IS NOT NULL) DESC,
+                                 created_at DESC NULLS LAST
+                    ) src
+                    WHERE c.changeset_id = src.changeset_id
+                      AND (src.created_at IS NOT NULL OR src.hashtags IS NOT NULL
+                           OR src.editor IS NOT NULL OR src.geom IS NOT NULL)
+                    """
+                )
         if any(parquet_dir.glob("temp_*_changeset_stats_*.parquet")):
             # The shard stores `tags` as a native LIST<STRUCT> (built in the handler), so ingest is a
             # direct column copy.
-            conn.execute(
-                f"""
-                INSERT OR IGNORE INTO changeset_stats
-                SELECT changeset_id, seq_id, uid,
-                       nodes_created, nodes_modified, nodes_deleted,
-                       ways_created,  ways_modified,  ways_deleted,
-                       rels_created,  rels_modified,  rels_deleted,
-                       poi_created,   poi_modified,
-                       tags
-                FROM read_parquet('{pattern("changeset_stats")}')
-                """
-            )
+            shard_glob = pattern("changeset_stats")
+            for low, high in _id_ranges(conn, shard_glob):
+                conn.execute(
+                    f"""
+                    INSERT OR IGNORE INTO changeset_stats
+                    SELECT changeset_id, seq_id, uid,
+                           nodes_created, nodes_modified, nodes_deleted,
+                           ways_created,  ways_modified,  ways_deleted,
+                           rels_created,  rels_modified,  rels_deleted,
+                           poi_created,   poi_modified,
+                           tags
+                    FROM read_parquet('{shard_glob}')
+                    WHERE changeset_id >= {low} AND changeset_id < {high}
+                    """
+                )
     finally:
         conn.execute("SET preserve_insertion_order = true")
 

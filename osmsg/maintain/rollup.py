@@ -6,6 +6,7 @@ import pathlib
 
 import duckdb
 
+from ..db.schema import _apply_runtime_pragmas
 from ..exceptions import OsmsgError
 from ..stats import COUNT_COLS as _COUNT_COLS
 from .parquet import ROW_GROUP_SIZE
@@ -71,6 +72,7 @@ def build_month_rollups(year: int, month: int, out: pathlib.Path) -> None:
         raise OsmsgError(f"missing raw partition for {year:04d}-{month:02d}; export the month first")
 
     con = duckdb.connect()
+    _apply_runtime_pragmas(con)
     con.execute(f"CREATE VIEW cf AS SELECT * FROM read_parquet('{changefiles}')")
     con.execute(f"CREATE VIEW cs AS SELECT * FROM read_parquet('{changesets}')")
 
