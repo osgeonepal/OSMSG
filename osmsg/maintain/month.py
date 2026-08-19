@@ -3,6 +3,7 @@ parquet partitions, and optionally upload them to HuggingFace."""
 
 import calendar
 import datetime as dt
+import os
 import pathlib
 import subprocess
 
@@ -72,9 +73,7 @@ def generate_month(year: int, month: int, work: pathlib.Path) -> pathlib.Path:
             output_dir=work,
             store_only=True,
             delete_temp=True,
-            # One parse worker so only a single day-diff (its stats + osmium node-location index) is resident
-            # at a time, keeping a month's build within a small-box memory budget. DuckDB still uses all cores.
-            workers=1,
+            workers=int(os.getenv("OSMSG_MAINTAIN_WORKERS", "1")),
         )
     )
     return work / f"{name}.duckdb"

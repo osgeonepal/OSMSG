@@ -1,0 +1,49 @@
+name: Maintain monthly rollup
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        { description: "Month YYYY-MM (blank = last completed)", default: "" }
+      upload:
+        { description: "Publish to HuggingFace", type: boolean, default: false }
+
+permissions: { contents: read }
+concurrency: { group: maintain-rollup, cancel-in-progress: false }
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      REPO: kshitijrajsharma/osmsg-history
+      OSMSG_MAINTAIN_WORKERS: "3"
+    steps:
+      - uses: jlumbroso/free-disk-space@main
+        with:
+          {
+            tool-cache: true,
+            large-packages: true,
+            docker-images: true,
+            swap-storage: false,
+          }
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: { enable-cache: true }
+      - run: uv sync --frozen --no-dev
+      - id: m
+        env: { IN: "${{ inputs.month }}" }
+        run: |
+          M="${IN:-$(date -u -d "$(date -u +%Y-%m-01) -1 day" +%Y-%m)}"
+          [[ "$M" =~ ^[0-9]{4}-[0-9]{2}$ ]] || { echo "bad month: $M"; exit 1; }
+          echo "month=$M" >> "$GITHUB_OUTPUT"
+      - if: ${{ inputs.upload }}
+        env: { HF_TOKEN: "${{ secrets.HF_TOKEN }}" }
+        run: uvx --from huggingface_hub hf download "$REPO" rollup/hashtag_changeset/data.parquet rollup/users/data.parquet --repo-type dataset --local-dir "$RUNNER_TEMP/out"
+      - env: { HF_TOKEN: "${{ secrets.HF_TOKEN }}" }
+        run: |
+          export OSMSG_DUCKDB_TEMP_DIR="$RUNNER_TEMP/ducktmp"
+          if ${{ inputs.upload }}; then pub="--repo $REPO"; else pub="--no-upload"; fi
+          uv run osmsg maintain month "${{ steps.m.outputs.month }}" $pub --work-dir "$RUNNER_TEMP/work" --output-dir "$RUNNER_TEMP/out"
+      - if: always()
+        run: find "$RUNNER_TEMP/out" -name '*.parquet' -exec ls -lh {} \; >> "$GITHUB_STEP_SUMMARY" 2>&1 || true

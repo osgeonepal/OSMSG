@@ -2533,7 +2533,7 @@ button.ht-tag-add:hover {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 20px;
+    padding: 20px 20px 0;
 }
 
 .modal-head .pod-avatar {
