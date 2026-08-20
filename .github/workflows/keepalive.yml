@@ -1,0 +1,27 @@
+name: Keepalive
+
+on:
+  schedule:
+    - cron: "45 5 * * 1"
+  workflow_dispatch:
+
+permissions: { contents: write }
+concurrency: { group: keepalive, cancel-in-progress: false }
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Empty commit when the repo nears the scheduled-workflow disable window
+        run: |
+          days_old=$(( ( $(date -u +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Last commit was $days_old day(s) ago"
+          if [ "$days_old" -lt 45 ]; then
+            echo "Fresh enough; nothing to do."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --allow-empty -m "chore(keepalive): keep scheduled workflows enabled [skip ci]"
+          git push
