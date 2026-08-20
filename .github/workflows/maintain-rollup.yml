@@ -21,7 +21,7 @@ jobs:
       REPO: kshitijrajsharma/osmsg-history
       OSMSG_MAINTAIN_WORKERS: "3"
       OSMSG_DUCKDB_PRESERVE_ORDER: "false"
-      OSMSG_DUCKDB_MEMORY_LIMIT: "12GB"
+      OSMSG_DUCKDB_MEMORY_LIMIT: "4GB"
       UPLOAD: ${{ github.event_name == 'schedule' || inputs.upload }}
     steps:
       - uses: jlumbroso/free-disk-space@main
