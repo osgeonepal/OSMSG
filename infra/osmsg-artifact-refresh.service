@@ -1,0 +1,12 @@
+[Unit]
+Description=osmsg history artifact refresh (pull newest published month, then prune Postgres)
+Requires=docker.service
+After=docker.service network-online.target osmsg.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/osmsg/infra
+EnvironmentFile=/opt/osmsg/infra/.env
+ExecStart=/opt/osmsg/infra/run-artifact-refresh.sh
+TimeoutStartSec=3600

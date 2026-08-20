@@ -89,6 +89,21 @@ def prune_pg_cmd(
     prune_covered(psql_dsn, history_url, overlap=dt.timedelta(days=overlap_days))
 
 
+@maintain_app.command("refresh")
+def refresh_cmd(
+    artifact_dir: Annotated[Path, typer.Option("--artifact-dir", help="Local history artifact the API reads.")],
+    repo: Annotated[
+        str, typer.Option("--repo", help="HuggingFace dataset repo id to pull the newest month from.")
+    ] = "kshitijrajsharma/osmsg-history",
+) -> None:
+    """Pull the newest published month into the local artifact (atomic, verified) so the frontier advances
+    without a rebuild. Idempotent; a no-op when already current. Prune Postgres separately with prune-pg
+    once the API is serving the advanced frontier."""
+    from .refresh import refresh_artifact
+
+    refresh_artifact(repo, artifact_dir)
+
+
 @maintain_app.command("publish")
 def publish_cmd(
     out_dir: Annotated[Path, typer.Argument(help="Directory holding changefiles/ and changesets/.")],
