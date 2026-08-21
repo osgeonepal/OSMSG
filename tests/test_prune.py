@@ -32,3 +32,31 @@ def test_prune_covered_raises_without_manifest(monkeypatch):
     monkeypatch.setattr(prune, "fetch_manifest", lambda url: None)
     with pytest.raises(OsmsgError):
         prune.prune_covered("dsn", "url")
+
+
+class _FakeConn:
+    def __init__(self, calls):
+        self._calls = calls
+
+    def execute(self, sql):
+        self._calls.append(sql)
+        return self
+
+    def fetchone(self):
+        return (5,)
+
+    def close(self):
+        pass
+
+
+def test_prune_pg_deletes_natively_via_postgres_execute(monkeypatch):
+    calls = []
+    monkeypatch.setattr(prune.duckdb, "connect", lambda *a, **k: _FakeConn(calls))
+    stats_n, cs_n = prune.prune_pg("dsn", dt.datetime(2026, 7, 30, tzinfo=UTC))
+
+    deletes = [c for c in calls if "postgres_execute" in c and "DELETE" in c]
+    assert len(deletes) == 2  # child (changeset_stats) then parent (changesets)
+    assert "changeset_stats" in deletes[0]
+    assert "DELETE FROM changesets WHERE" in deletes[1] and "changeset_stats" not in deletes[1]
+    assert all("2026-07-30" in d for d in deletes)
+    assert (stats_n, cs_n) == (5, 5)

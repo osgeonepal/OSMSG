@@ -11,7 +11,8 @@ dsn="${OSMSG_PSQL_DSN:-postgresql://osmsg:osmsg@db:5432/osmsg}"
 repo="${OSMSG_HISTORY_REPO:-kshitijrajsharma/osmsg-history}"
 
 echo "[artifact-refresh] advancing ${artifact_host} from ${repo}"
-docker compose run --rm -e HF_XET_HIGH_PERFORMANCE=1 -v "${artifact_host}:/artifact" --entrypoint osmsg worker \
+# Cap Xet download concurrency so its reconstruction buffers stay well within the container memory limit.
+docker compose run --rm -e HF_XET_CLIENT_AC_MAX_DOWNLOAD_CONCURRENCY=4 -v "${artifact_host}:/artifact" --entrypoint osmsg worker \
   maintain refresh --artifact-dir /artifact --repo "${repo}"
 
 echo "[artifact-refresh] reloading the API onto the advanced frontier"
