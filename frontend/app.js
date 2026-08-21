@@ -612,34 +612,38 @@ async function runQuery() {
     releasePrimary();
     if (!alive()) return;
 
-    setStatus("Fetching related hashtags…");
-    const trending = await apiGet("hashtags", param({ limit: "50" }), ctrl.signal);
-    if (!alive()) return;
-    // Related hashtags = the OTHER tags on the same changesets; drop the exact searched tag(s).
-    const searched = new Set(state.hashtags.map((h) => String(h).replace(/^#/, "").toLowerCase()));
-    state.hashtagTrends = (trending || []).filter(
-      (t) => !searched.has(String(t.hashtag).replace(/^#/, "").toLowerCase())
-    );
-    if (typeof renderHashtagPieChart === "function") renderHashtagPieChart();
+    // Each secondary section is isolated so one failure can't blank the others or the primary content.
+    await runSection("related hashtags", ctrl, async () => {
+      setStatus("Fetching related hashtags…");
+      const trending = await apiGet("hashtags", param({ limit: "50" }), ctrl.signal);
+      if (!alive()) return;
+      // drop the exact searched tag(s); keep the co-occurring ones
+      const searched = new Set(state.hashtags.map((h) => String(h).replace(/^#/, "").toLowerCase()));
+      state.hashtagTrends = (trending || []).filter(
+        (t) => !searched.has(String(t.hashtag).replace(/^#/, "").toLowerCase())
+      );
+      if (typeof renderHashtagPieChart === "function") renderHashtagPieChart();
+    });
 
-    setStatus("Fetching editors…");
-    await fetchEditorStats();
-    if (!alive()) return;
+    await runSection("editors", ctrl, async () => {
+      setStatus("Fetching editors…");
+      await fetchEditorStats();
+    });
 
-    setStatus("Fetching tag breakdown…");
-    const tags = await apiGet("tags", param({ limit: "200" }), ctrl.signal);
-    if (!alive()) return;
-    state.tagRows = tags;
-    renderOverviewDetails();
+    await runSection("tag breakdown", ctrl, async () => {
+      setStatus("Fetching tag breakdown…");
+      const tags = await apiGet("tags", param({ limit: "200" }), ctrl.signal);
+      if (!alive()) return;
+      state.tagRows = tags;
+      renderOverviewDetails();
+    });
   } catch (err) {
-    if (err?.name !== "AbortError") {
+    // Primary failure: state it in every primary section instead of leaving blank skeletons.
+    if (err?.name !== "AbortError" && alive()) {
       console.warn("OSMSG query failed:", err);
-      // Surface a busy shed even when the first (summary) call is the one rejected, so the user is not
-      // left staring at loading skeletons.
-      if (err?.busy && alive()) {
-        showError(err);
-        $("#ov-strip-totals").innerHTML = "";
-      }
+      showError(err);
+      sectionMessage("#podium", busyOrErrorMsg(err));
+      sectionMessage("#ov-strip-totals", busyOrErrorMsg(err));
     }
   } finally {
     releasePrimary();
@@ -705,6 +709,7 @@ async function loadLeaderboardPage(setPodium = false, forceFetch = false) {
     console.warn("OSMSG leaderboard fetch failed:", err);
     state.lastError = err;
     showError(err);
+    if (setPodium) sectionMessage("#podium", busyOrErrorMsg(err));
   } finally {
     clearTimeout(timeout);
     if (state.lbInflight === ctrl) state.lbInflight = null;
@@ -715,6 +720,25 @@ async function loadLeaderboardPage(setPodium = false, forceFetch = false) {
 function onSectionError(section, err, ctrl) {
   if (err?.name === "AbortError" && state.query !== ctrl) return;
   console.warn(`OSMSG ${section} fetch failed:`, err);
+}
+
+// Run one secondary section in isolation so its failure can't abort the query or blank another section.
+async function runSection(name, ctrl, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    onSectionError(name, err, ctrl);
+  }
+}
+
+function sectionMessage(sel, msg) {
+  const el = $(sel);
+  if (el) el.innerHTML = `<div class="section-msg">${escapeHtml(msg)}</div>`;
+}
+
+function busyOrErrorMsg(err) {
+  const busy = err?.busy || err?.status === 503 || err?.name === "AbortError" || state.summary;
+  return busy ? "Server is busy, give it a moment and hit Extract again." : "Couldn't load these stats.";
 }
 
 let toastTimer;
@@ -1428,24 +1452,17 @@ function showLoading() {
 }
 function showError(err) {
   const tb = $("#lb-body");
-  if (err?.busy) {
-    tb.innerHTML = `<tr><td colspan="8"><div class="errbox">
-      <i data-lucide="hourglass"></i>
-      <h3>Server is busy right now</h3>
-      <p style="margin-top:8px;color:#717D78">Too many queries are running at once. Give it a moment, then hit Search again.</p>
-    </div></td></tr>`;
-    $("#pagination").hidden = true;
-    refreshIcons(tb);
-    return;
-  }
-  const msg = err?.message || "Network error";
-  const isAbort = err?.name === "AbortError";
+  // A loaded overview proves the API is reachable, so a failure here is a slow/busy query, not "unreachable".
+  const busy = err?.busy || err?.status === 503 || err?.name === "AbortError" || !!state.summary;
+  const body = busy
+    ? `<p style="margin-top:8px;color:var(--muted)">This is a large query and the server is busy right now. Give it a moment, then hit Extract again.</p>`
+    : `<p style="margin-top:8px"><code>${escapeHtml(err?.message || "Network error")}</code></p>
+       <p style="margin-top:14px;color:var(--muted)">The API may be unreachable. Check your connection, then hit Extract to try again.</p>
+       <p style="margin-top:18px"><a href="${API_BASE}/docs/swagger" target="_blank" rel="noopener">Open the API docs <i data-lucide="external-link" class="ico-sm" style="vertical-align:-2px"></i></a></p>`;
   tb.innerHTML = `<tr><td colspan="8"><div class="errbox">
-    <i data-lucide="cloud-off"></i>
-    <h3>${isAbort ? "Request timed out" : "Couldn't reach the OSMSG API"}</h3>
-    <p style="margin-top:8px"><code style="font-family:var(--mono);font-size:12px;background:#F4F0E6;padding:2px 6px;border-radius:4px;color:#3A4744">${escapeHtml(msg)}</code></p>
-    <p style="margin-top:14px;color:#717D78">If this is a CORS error and you're hosting this page off the API origin, the API needs to allow your origin. Hit Search to try again.</p>
-    <p style="margin-top:18px"><a href="${API_BASE}/docs/swagger" target="_blank" rel="noopener">Open the API docs <i data-lucide="external-link" class="ico-sm" style="vertical-align:-2px"></i></a></p>
+    <i data-lucide="${busy ? "hourglass" : "cloud-off"}"></i>
+    <h3>${busy ? "Server is busy" : "Couldn't reach the OSMSG API"}</h3>
+    ${body}
   </div></td></tr>`;
   $("#pagination").hidden = true;
   refreshIcons(tb);

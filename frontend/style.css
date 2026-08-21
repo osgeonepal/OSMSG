@@ -2829,6 +2829,13 @@ button.ht-tag-add:hover {
     color: var(--ink-2);
 }
 
+.section-msg {
+    padding: 24px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+}
+
 .fade-in {
     animation: fadein 0.35s ease-out both;
 }
