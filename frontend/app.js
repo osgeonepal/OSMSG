@@ -472,6 +472,7 @@ function sleep(ms, signal) {
     signal?.addEventListener("abort", () => { clearTimeout(t); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
   });
 }
+// A 429 means the API shed load ("retry shortly"); retry once after a short pause before showing busy.
 async function apiGet(name, params, signal) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(endpoint(name, params), { headers: { accept: "application/json" }, mode: "cors", signal });
@@ -480,6 +481,12 @@ async function apiGet(name, params, signal) {
         await sleep(BUSY_BACKOFF_MS, signal);
         continue;
       }
+      const err = new Error("Server is busy");
+      err.busy = true;
+      throw err;
+    }
+    if (res.status === 503) {
+      // Watchdog interrupted a large query; retrying now would just time out again, so surface busy.
       const err = new Error("Server is busy");
       err.busy = true;
       throw err;
@@ -627,6 +634,8 @@ async function runQuery() {
   } catch (err) {
     if (err?.name !== "AbortError") {
       console.warn("OSMSG query failed:", err);
+      // Surface a busy shed even when the first (summary) call is the one rejected, so the user is not
+      // left staring at loading skeletons.
       if (err?.busy && alive()) {
         showError(err);
         $("#ov-strip-totals").innerHTML = "";

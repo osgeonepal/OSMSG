@@ -12,10 +12,11 @@ import os
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
 import duckdb
-from litestar.exceptions import TooManyRequestsException
+from litestar.exceptions import HTTPException, TooManyRequestsException
 
 from osmsg import query
 from osmsg.db.schema import _apply_runtime_pragmas
@@ -115,15 +116,50 @@ def _acquire(pool: queue.Queue) -> duckdb.DuckDBPyConnection:
         raise TooManyRequestsException(detail="Server at capacity; retry shortly.") from None
 
 
+# A timed-out all-time query caches nothing, so its retry is just as slow; on timeout we re-run it in the
+# background to fill the cache the retry reads. One at a time on its own connection so it can't starve the pool.
+_warm_pool = ThreadPoolExecutor(max_workers=1)
+_warm_inflight: set[tuple[str, str]] = set()
+_warm_lock = threading.Lock()
+
+
+def _warm(fn, hashtag, kwargs, key) -> None:
+    con = _connect()
+    try:
+        fn(con, hashtag, _sources(), **kwargs)
+    except duckdb.Error:
+        pass
+    finally:
+        con.close()
+        with _warm_lock:
+            _warm_inflight.discard(key)
+
+
+def _enqueue_warm(fn, hashtag, kwargs) -> None:
+    """Re-run an all-time query off the request path to fill its cache, deduped per key, best-effort.
+    No-op when caching is off."""
+    if _QUERY_CACHE_DIR is None:
+        return
+    key = (fn.__name__, repr(hashtag))
+    with _warm_lock:
+        if key in _warm_inflight:
+            return
+        _warm_inflight.add(key)
+    _warm_pool.submit(_warm, fn, hashtag, kwargs, key)
+
+
 def _run(fn, hashtag, **kwargs):
     """Borrow a warm pooled connection (429 past _POOL_WAIT caps concurrency), run under a watchdog that
     interrupts a query past _QUERY_TIMEOUT, and return it (replaced if it errored or was interrupted)."""
     pool = _pool_ready()
     con = _acquire(pool)
     done = threading.Event()
+    interrupted = False
 
     def _watchdog() -> None:
+        nonlocal interrupted
         if not done.wait(_QUERY_TIMEOUT):
+            interrupted = True
             with contextlib.suppress(duckdb.Error):
                 con.interrupt()
 
@@ -134,6 +170,11 @@ def _run(fn, hashtag, **kwargs):
         return fn(con, hashtag, _sources(), **kwargs)
     except duckdb.Error:
         healthy = False  # interrupted or DB error -> the connection may be dirty, recycle it
+        if interrupted:
+            # Only all-time queries hit the shared cache, so only they are worth warming.
+            if kwargs.get("start") is None and kwargs.get("end") is None:
+                _enqueue_warm(fn, hashtag, kwargs)
+            raise HTTPException(status_code=503, detail="Server is busy, please try again in a moment.") from None
         raise
     finally:
         done.set()
