@@ -9,18 +9,14 @@ import pathlib
 import shutil
 
 import duckdb
-import requests
+import huggingface_hub
 
 from ..exceptions import OsmsgError
 from ..history import fetch_manifest
-from ..ui import info, warn
+from ..ui import info
 
 UTC = dt.UTC
 VERIFY_TOLERANCE = dt.timedelta(days=2)
-_HF_DATASETS = "https://huggingface.co/datasets"
-_DOWNLOAD_CHUNK = 1 << 20
-_DOWNLOAD_RETRIES = 5
-_INTERRUPTED = (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError)
 
 _ROLLUP_FILES = {
     "hashtag_changeset.parquet": "rollup/hashtag_changeset/data.parquet",
@@ -28,30 +24,12 @@ _ROLLUP_FILES = {
 }
 
 
-def _download_file(repo: str, remote: str, dest: pathlib.Path) -> pathlib.Path:
-    """Stream a published file from the dataset's resolve/main URL to dest, preserving its exact bytes
-    (and so its row-group layout). Resumes with a Range request when the connection drops mid-stream, so
-    the multi-GB rollup survives a flaky link; raises once the retry budget is spent, before the swap."""
-    url = f"{_HF_DATASETS}/{repo}/resolve/main/{remote}"
-    stalls = 0
-    while stalls < _DOWNLOAD_RETRIES:
-        have = dest.stat().st_size if dest.exists() else 0
-        headers = {"Range": f"bytes={have}-"} if have else {}
-        try:
-            with requests.get(url, headers=headers, stream=True, timeout=60) as response:
-                response.raise_for_status()
-                resuming = have > 0 and response.status_code == 206
-                with open(dest, "ab" if resuming else "wb") as handle:
-                    for chunk in response.iter_content(_DOWNLOAD_CHUNK):
-                        handle.write(chunk)
-            return dest
-        except _INTERRUPTED as exc:
-            now = dest.stat().st_size if dest.exists() else 0
-            stalls = 0 if now > have else stalls + 1
-            if stalls >= _DOWNLOAD_RETRIES:
-                raise OsmsgError(f"{remote}: download stalled after {stalls} attempts with no progress: {exc}") from exc
-            warn(f"{remote}: interrupted ({type(exc).__name__}); resuming from {now:,} bytes")
-    raise OsmsgError(f"{remote}: download failed")
+def _download(repo: str, remote: str, into_dir: pathlib.Path) -> pathlib.Path:
+    """Download a published dataset file into into_dir. huggingface_hub handles resume, retry, and the
+    parallel chunked transfer that a single stream cannot sustain over a long-haul link."""
+    return pathlib.Path(
+        huggingface_hub.hf_hub_download(repo_id=repo, filename=remote, repo_type="dataset", local_dir=str(into_dir))
+    )
 
 
 def _rollup_bounds(parquet: pathlib.Path) -> tuple[int, dt.datetime | None]:
@@ -99,10 +77,8 @@ def refresh_artifact(repo: str, artifact_dir: pathlib.Path) -> bool:
         shutil.rmtree(scratch)
     scratch.mkdir()
 
-    downloaded = {
-        name: _download_file(repo, remote_path, scratch / name) for name, remote_path in _ROLLUP_FILES.items()
-    }
-    manifest = _download_file(repo, "manifest.json", scratch / "manifest.json")
+    downloaded = {name: _download(repo, remote_path, scratch) for name, remote_path in _ROLLUP_FILES.items()}
+    manifest = _download(repo, "manifest.json", scratch)
     _verify(downloaded["hashtag_changeset.parquet"], remote.frontier, artifact_dir / "hashtag_changeset.parquet")
     for name, path in downloaded.items():
         os.replace(path, artifact_dir / name)
