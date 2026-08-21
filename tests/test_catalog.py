@@ -81,6 +81,18 @@ def test_combine_split_equals_whole():
     assert whole[1] == 3  # three #hotosm changesets, #missingmaps excluded
 
 
+def test_recent_counts_changeset_with_hashtag_but_no_stats():
+    con = duckdb.connect()
+    _make(con)
+    # changeset 5: recent, carries #hotosm, present in csets but with NO cs_stats row (no counted edits).
+    con.execute("INSERT INTO csets VALUES (5, 11, 'iD', '2026-07-11', ['#hotosm-noedit'])")
+    lo, hi = "#hotosm", prefix_upper_bound("#hotosm")
+    con.execute("CREATE TABLE empty_hist AS SELECT * FROM hc LIMIT 0")  # measure the recent side alone
+    sql, params = hashtag_scope("empty_hist", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
+    combined = _summary(con, sql, params)
+    assert combined[1] == 3  # 2 and 3 (with stats) + 5 (hashtag only, no stats) all count as changesets
+
+
 def test_recent_side_only_counts_after_frontier():
     con = duckdb.connect()
     _make(con)

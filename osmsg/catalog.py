@@ -27,9 +27,9 @@ def _pg_query(attach: str, inner: str) -> str:
 # Recent side aggregated in Postgres via the changeset_hashtag prefix index; each returns an inlined
 # postgres_query relation (no bind params), DISTINCT-deduped so a multi-tag changeset counts once.
 
-_PSUM = ", ".join(f"sum(s.{c}) AS {c}" for c in COUNT_COLS)
+_PSUM = ", ".join(f"coalesce(sum(s.{c}), 0) AS {c}" for c in COUNT_COLS)
 _OSUM = ", ".join(f"sum({c}) AS {c}" for c in COUNT_COLS)
-_MC = " + ".join(f"s.{c}" for c in MAP_CHANGES_COLS)
+_MC = " + ".join(f"coalesce(s.{c}, 0)" for c in MAP_CHANGES_COLS)
 
 
 def _pg_matched(prefixes, frontier, start, end, hashtag_table="changeset_hashtag", carry_created_at=False) -> str:
@@ -55,12 +55,16 @@ def _pg_matched(prefixes, frontier, start, end, hashtag_table="changeset_hashtag
 
 
 def _pg_perchangeset(prefixes, frontier, start, end, extra: str = "") -> str:
-    """CTEs `m` (matched changeset ids) and `pc` (one row per changeset: uid, summed counts{extra}),
-    the shared basis every recent aggregate groups from."""
+    """CTEs `m` (matched changeset ids) and `pc` (one row per matched changeset: uid, summed counts{extra}),
+    the shared basis every recent aggregate groups from. `changesets` is the inner join (every matched
+    changeset has a row, and it carries uid/editor); `changeset_stats` is LEFT so a changeset carrying the
+    hashtag but no counted element edits still counts as one changeset, with its sums zeroed, matching how
+    the history rollup and external stats count changesets."""
     return (
         f"WITH m AS ({_pg_matched(prefixes, frontier, start, end)}), "
-        f"pc AS (SELECT s.changeset_id, max(s.uid) AS uid{extra}, {_PSUM} "
-        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id)"
+        f"pc AS (SELECT c.changeset_id, c.uid{extra}, {_PSUM} "
+        f"FROM m JOIN changesets c USING (changeset_id) "
+        f"LEFT JOIN changeset_stats s USING (changeset_id) GROUP BY c.changeset_id, c.uid)"
     )
 
 
@@ -76,10 +80,6 @@ def recent_user_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
 def recent_leaderboard_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     """Per-uid recent aggregate with the distinct editors each user used, for the leaderboard rows."""
     basis = _pg_perchangeset(prefixes, frontier, start, end, extra=", max(c.editor) AS editor")
-    basis = basis.replace(
-        "FROM m JOIN changeset_stats s USING (changeset_id)",
-        "FROM m JOIN changeset_stats s USING (changeset_id) JOIN changesets c USING (changeset_id)",
-    )
     inner = (
         f"{basis} SELECT uid, count(*) AS changesets, {_OSUM}, "
         f"array_agg(DISTINCT editor) AS editors FROM pc GROUP BY uid"
@@ -102,10 +102,6 @@ def recent_tag_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
 def recent_editor_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     """Per (editor, uid) recent aggregate: changesets (cs), map_changes. Powers the editors endpoint."""
     basis = _pg_perchangeset(prefixes, frontier, start, end, extra=f", max(c.editor) AS editor, sum({_MC}) AS mc")
-    basis = basis.replace(
-        "FROM m JOIN changeset_stats s USING (changeset_id)",
-        "FROM m JOIN changeset_stats s USING (changeset_id) JOIN changesets c USING (changeset_id)",
-    )
     inner = (
         f"{basis} SELECT COALESCE(NULLIF(editor, ''), 'unknown') AS editor, uid, count(*) AS cs, "
         f"sum(mc) AS map_changes FROM pc GROUP BY 1, uid"
@@ -115,13 +111,15 @@ def recent_editor_agg(attach, *, prefixes, frontier, start=None, end=None) -> st
 
 def recent_bucket_agg(attach, interval: str, *, prefixes, frontier, start=None, end=None) -> str:
     """Per time-bucket recent aggregate: changesets, distinct users, map_changes. Powers the trends
-    endpoint. `created_at` comes from `changeset_hashtag` (carried in the matched CTE), so this joins only
-    changeset_stats, no second scan of changesets. Buckets are disjoint across the frontier -> additive."""
+    endpoint. `created_at` comes from `changeset_hashtag` (carried in the matched CTE); `changeset_stats`
+    is LEFT so a hashtag-only changeset still counts (zeroed map_changes), matching the summary count.
+    Buckets are disjoint across the frontier -> additive."""
     m = _pg_matched(prefixes, frontier, start, end, carry_created_at=True)
     inner = (
         f"WITH m AS ({m}), "
-        f"pc AS (SELECT s.changeset_id, max(s.uid) AS uid, m.created_at AS created_at, sum({_MC}) AS mc "
-        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id, m.created_at) "
+        f"pc AS (SELECT c.changeset_id, c.uid AS uid, m.created_at AS created_at, sum({_MC}) AS mc "
+        f"FROM m JOIN changesets c USING (changeset_id) LEFT JOIN changeset_stats s USING (changeset_id) "
+        f"GROUP BY c.changeset_id, c.uid, m.created_at) "
         f"SELECT to_char(date_trunc({_pg_str(interval)}, created_at), 'YYYY-MM-DD') AS bucket, "
         f"count(*) AS changesets, count(DISTINCT uid) AS users, sum(mc) AS map_changes FROM pc GROUP BY 1"
     )
@@ -136,8 +134,9 @@ def recent_hashtag_agg(attach, *, prefixes, frontier, start=None, end=None) -> s
         f'(ch.hashtag COLLATE "C" >= {_pg_str(lo)} AND ch.hashtag COLLATE "C" < {_pg_str(hi)})' for lo, hi in prefixes
     )
     inner = (
-        f"WITH m AS ({m}), pc AS (SELECT s.changeset_id, max(s.uid) AS uid, sum({_MC}) AS mc "
-        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id) "
+        f"WITH m AS ({m}), pc AS (SELECT c.changeset_id, c.uid AS uid, sum({_MC}) AS mc "
+        f"FROM m JOIN changesets c USING (changeset_id) LEFT JOIN changeset_stats s USING (changeset_id) "
+        f"GROUP BY c.changeset_id, c.uid) "
         f"SELECT ch.hashtag AS hashtag, pc.uid AS uid, count(*) AS changesets, sum(pc.mc) AS mc "
         f"FROM pc JOIN changeset_hashtag ch USING (changeset_id) WHERE {ranges} GROUP BY ch.hashtag, pc.uid"
     )
@@ -150,8 +149,9 @@ def recent_cooccur_agg(attach, *, prefixes, frontier, start=None, end=None) -> s
     Same as `recent_hashtag_agg` but without narrowing the joined hashtags to the searched ranges."""
     m = _pg_matched(prefixes, frontier, start, end)
     inner = (
-        f"WITH m AS ({m}), pc AS (SELECT s.changeset_id, max(s.uid) AS uid, sum({_MC}) AS mc "
-        f"FROM m JOIN changeset_stats s USING (changeset_id) GROUP BY s.changeset_id) "
+        f"WITH m AS ({m}), pc AS (SELECT c.changeset_id, c.uid AS uid, sum({_MC}) AS mc "
+        f"FROM m JOIN changesets c USING (changeset_id) LEFT JOIN changeset_stats s USING (changeset_id) "
+        f"GROUP BY c.changeset_id, c.uid) "
         f"SELECT ch.hashtag AS hashtag, pc.uid AS uid, count(*) AS changesets, sum(pc.mc) AS mc "
         f"FROM pc JOIN changeset_hashtag ch USING (changeset_id) GROUP BY ch.hashtag, pc.uid"
     )
@@ -238,7 +238,7 @@ def _recent_from_base(stats_rel: str, changesets_rel: str, window_sql: str, pref
     frontier, counts summed across seq rows and native `tags` merged to match the rollup shape. `prefix_pred`
     OR-s `lower(h) >= ? AND lower(h) < ?`; placeholders in order: frontier, (window bounds), (prefix bounds)."""
     sums = ", ".join(f"SUM(s.{c}) AS {c}" for c in COUNT_COLS)
-    payload = ", ".join(f"p.{c}" for c in COUNT_COLS)
+    payload = ", ".join(f"COALESCE(p.{c}, 0) AS {c}" for c in COUNT_COLS)
     return f"""
         WITH matched AS (
             SELECT changeset_id, uid, editor, created_at
@@ -264,7 +264,7 @@ def _recent_from_base(stats_rel: str, changesets_rel: str, window_sql: str, pref
             FROM tag_rows GROUP BY changeset_id
         )
         SELECT m.changeset_id, m.uid, m.editor, m.created_at, {payload}, COALESCE(t.tags, []) AS tags
-        FROM matched m JOIN per_cs p USING (changeset_id) LEFT JOIN tags t USING (changeset_id)
+        FROM matched m LEFT JOIN per_cs p USING (changeset_id) LEFT JOIN tags t USING (changeset_id)
     """
 
 
