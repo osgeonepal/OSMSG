@@ -6,12 +6,62 @@ import json
 
 import duckdb
 import pytest
+import requests
 
 from osmsg.exceptions import OsmsgError
 from osmsg.history import Manifest
 from osmsg.maintain import refresh
 
 UTC = dt.UTC
+
+
+class _FakeResponse:
+    def __init__(self, status_code, chunks, break_after=None):
+        self.status_code = status_code
+        self._chunks = chunks
+        self._break_after = break_after
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_content(self, chunk_size):
+        for index, chunk in enumerate(self._chunks):
+            if self._break_after is not None and index == self._break_after:
+                raise requests.exceptions.ChunkedEncodingError("connection broken")
+            yield chunk
+
+
+def test_download_resumes_after_interruption(tmp_path, monkeypatch):
+    dest = tmp_path / "rollup.parquet"
+    calls = []
+
+    def fake_get(url, headers=None, stream=True, timeout=60):
+        calls.append(headers or {})
+        if not headers:
+            return _FakeResponse(200, [b"aa", b"bb", b"cc"], break_after=2)
+        return _FakeResponse(206, [b"cc", b"dd"])
+
+    monkeypatch.setattr(refresh.requests, "get", fake_get)
+    refresh._download_file("test/repo", "rollup/x/data.parquet", dest)
+    assert dest.read_bytes() == b"aabbccdd"
+    assert calls[1]["Range"] == "bytes=4-"
+
+
+def test_download_raises_after_retry_budget(tmp_path, monkeypatch):
+    dest = tmp_path / "rollup.parquet"
+
+    def always_break(url, headers=None, stream=True, timeout=60):
+        return _FakeResponse(200, [b"aa", b"bb"], break_after=0)
+
+    monkeypatch.setattr(refresh.requests, "get", always_break)
+    with pytest.raises(OsmsgError, match="stalled after"):
+        refresh._download_file("test/repo", "rollup/x/data.parquet", dest)
 
 
 def _month_start(year, month):
