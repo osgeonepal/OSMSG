@@ -598,3 +598,64 @@ def test_push_chunked_scales_with_row_count_and_caps():
 
 def test_push_chunked_empty_source_pushes_nothing():
     assert _count_pushes(0, None, None) == []
+
+
+@pytest.mark.network
+@pytest.mark.skipif(not os.environ.get("OSMSG_PG_DSN"), reason="OSMSG_PG_DSN not set; live PG push not exercised")
+def test_metadata_only_changeset_fills_stub_without_fk_abort(fresh_db):
+    """A long-open changeset's metadata arrives in a later, no-edit delta (its uid absent from this
+    delta's changeset_stats). With history present the push takes the not_history branch, which must
+    still carry that user, or the changesets FK aborts the whole push and the stub is stranded forever."""
+    dsn = os.environ["OSMSG_PG_DSN"]
+    safe_dsn = dsn.replace("'", "''")
+
+    fresh_db.execute("INSTALL postgres")
+    fresh_db.execute("LOAD postgres")
+    fresh_db.execute(f"ATTACH '{safe_dsn}' AS pg_w (TYPE postgres)")
+    try:
+        for stmt in (s.strip() for s in PG_SCHEMA.strip().split(";")):
+            if stmt:
+                fresh_db.execute(f"CALL postgres_execute('pg_w', $${stmt}$$)")
+        for table in ("changeset_hashtag", "changeset_stats", "changesets", "users", "state"):
+            fresh_db.execute(f"CALL postgres_execute('pg_w', $$DELETE FROM {table}$$)")
+        # A seq_id=0 history row makes _pg_has_history() true -> the not_history branch runs.
+        fresh_db.execute("CALL postgres_execute('pg_w', $$INSERT INTO users VALUES (1, 'hist')$$)")
+        fresh_db.execute("CALL postgres_execute('pg_w', $$INSERT INTO changesets (changeset_id, uid) VALUES (1, 1)$$)")
+        fresh_db.execute(
+            "CALL postgres_execute('pg_w', $$INSERT INTO changeset_stats "
+            "(changeset_id, seq_id, uid, nodes_created, nodes_modified, nodes_deleted, ways_created, "
+            "ways_modified, ways_deleted, rels_created, rels_modified, rels_deleted, poi_created, poi_modified) "
+            "VALUES (1, 0, 1, 0,0,0,0,0,0,0,0,0,0,0)$$)"
+        )
+    finally:
+        fresh_db.execute("DETACH pg_w")
+
+    # Delta buffer: changeset 500 is metadata-only (uid 100, full metadata, NO stats this tick);
+    # changeset 600 has live edits (uid 200). uid 100 is absent from this delta's changeset_stats.
+    fresh_db.execute("INSERT INTO users VALUES (100, 'stubuser'), (200, 'liveuser')")
+    fresh_db.execute(
+        "INSERT INTO changesets VALUES "
+        "(500, 100, '2026-08-04 02:01:51+00', ['#msf'], 'iD', NULL), "
+        "(600, 200, '2026-08-04 03:00:00+00', ['#msf'], 'iD', NULL)"
+    )
+    fresh_db.execute("INSERT INTO changeset_stats VALUES (600, 7228931, 200, 10,0,0,2,0,0,0,0,0,0,0, NULL)")
+
+    to_psql(fresh_db, dsn)  # must not raise the changesets_uid_fkey violation
+
+    verifier = duckdb.connect(":memory:")
+    verifier.execute("INSTALL postgres")
+    verifier.execute("LOAD postgres")
+    verifier.execute(f"ATTACH '{safe_dsn}' AS pg_r (TYPE postgres, READ_ONLY)")
+    try:
+        landed = verifier.execute("SELECT created_at FROM pg_r.changesets WHERE changeset_id = 500").fetchone()
+        user_ok = verifier.execute("SELECT count(*) FROM pg_r.users WHERE uid = 100").fetchone()[0]
+        hashtag_ok = verifier.execute(
+            "SELECT count(*) FROM pg_r.changeset_hashtag WHERE changeset_id = 500 AND hashtag = '#msf'"
+        ).fetchone()[0]
+    finally:
+        verifier.execute("DETACH pg_r")
+        verifier.close()
+
+    assert landed is not None and landed[0] is not None  # metadata-only changeset reached PG
+    assert user_ok == 1  # its user was carried even without an edit row this tick
+    assert hashtag_ok == 1  # and its #msf hashtag reached the index (the stub is no longer stranded)
