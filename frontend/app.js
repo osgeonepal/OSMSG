@@ -179,6 +179,7 @@ function sumTagKey(ts, k) {
 
 function transform(row) {
   const ts = row.tag_stats || {};
+  const n = (v) => v || 0;  // coalesce so a field the API omits never renders as NaN
   const b = sumTagKey(ts, "building"),
     h = sumTagKey(ts, "highway");
   const lu = sumTagKey(ts, "landuse"),
@@ -191,19 +192,19 @@ function transform(row) {
     hashtags: row.hashtags || [],
     editors: row.editors || [],
     rank: row.rank,
-    changesets: row.changesets,
-    map_changes: row.map_changes,
-    nodes_created: row.nodes_created,
-    nodes_modified: row.nodes_modified,
-    nodes_deleted: row.nodes_deleted,
-    ways_created: row.ways_created,
-    ways_modified: row.ways_modified,
-    ways_deleted: row.ways_deleted,
-    rels_created: row.rels_created,
-    rels_modified: row.rels_modified,
-    rels_deleted: row.rels_deleted,
-    pois_created: row.poi_created,
-    pois_modified: row.poi_modified,
+    changesets: n(row.changesets),
+    map_changes: n(row.map_changes),
+    nodes_created: n(row.nodes_created),
+    nodes_modified: n(row.nodes_modified),
+    nodes_deleted: n(row.nodes_deleted),
+    ways_created: n(row.ways_created),
+    ways_modified: n(row.ways_modified),
+    ways_deleted: n(row.ways_deleted),
+    rels_created: n(row.rels_created),
+    rels_modified: n(row.rels_modified),
+    rels_deleted: n(row.rels_deleted),
+    pois_created: n(row.poi_created),
+    pois_modified: n(row.poi_modified),
     buildings_created: b.c,
     buildings_modified: b.m,
     highways_created: h.c,
@@ -218,9 +219,9 @@ function transform(row) {
     natural_modified: nt.m,
     amenities_created: am.c,
     amenities_modified: am.m,
-    created: row.nodes_created + row.ways_created + row.rels_created,
-    modified: row.nodes_modified + row.ways_modified + row.rels_modified,
-    deleted: row.nodes_deleted + row.ways_deleted + row.rels_deleted,
+    created: n(row.nodes_created) + n(row.ways_created) + n(row.rels_created),
+    modified: n(row.nodes_modified) + n(row.ways_modified) + n(row.rels_modified),
+    deleted: n(row.nodes_deleted) + n(row.ways_deleted) + n(row.rels_deleted),
     tag_stats: ts,
   };
 }
@@ -505,8 +506,11 @@ function freezeWindow() {
 function windowParams() {
   if (!state.windowStart || !state.windowEnd) freezeWindow();
   const p = new URLSearchParams();
-  p.set("start", isoUTC(state.windowStart));
-  p.set("end", isoUTC(state.windowEnd));
+  // All-time omits the window: an explicit full range bypasses the API's all-time cache and warm.
+  if (state.range !== "all") {
+    p.set("start", isoUTC(state.windowStart));
+    p.set("end", isoUTC(state.windowEnd));
+  }
   return p;
 }
 
@@ -584,6 +588,7 @@ async function runQuery() {
   state.editorStats = null;
   state.total = 0;
   setOverviewLoading();
+  showLoading();  // skeleton the table now; the leaderboard fetch only starts after summary resolves
   $("#podium")?.closest("section")?.style.setProperty("display", "");
   $("#podium").innerHTML = "";
   if (typeof setChartsLoading === "function") setChartsLoading();
@@ -1129,7 +1134,11 @@ const cellsHtml = (cells, r) =>
     .join("");
 
 function openUserModal(username) {
-  const r = state.rows.find((x) => x.username === username);
+  // Podium holds the global top 3, which may not be on the current leaderboard page: search both.
+  const r =
+    state.rows.find((x) => x.username === username) ||
+    state.podium.find((x) => x.username === username) ||
+    state.batch.find((x) => x.username === username);
   if (!r) return;
   const modal = $("#user-modal");
 
@@ -1139,7 +1148,7 @@ function openUserModal(username) {
 
 
   const subEl = $("#user-modal-sub");
-  subEl.textContent = `rank #${state.rows.findIndex((x) => x.username === username) + 1} · ${fmt.format(r.map_changes)} map changes · ${fmt.format(r.changesets)} changesets`;
+  subEl.textContent = `rank #${r.rank ?? "?"} · ${fmt.format(r.map_changes)} map changes · ${fmt.format(r.changesets)} changesets`;
 
   const av = $("#user-modal-avatar");
   av.style.background = avatarColor(r.username);
