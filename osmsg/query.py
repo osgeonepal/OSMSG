@@ -171,19 +171,6 @@ def _recent_users(s: Sources, prefixes, start, end) -> tuple[str, list[object]]:
     return f"(SELECT uid, count(*) AS changesets, {_SUM_AS} FROM ({rsql}) GROUP BY uid)", rp
 
 
-def _recent_leaderboard(s: Sources, prefixes, start, end) -> tuple[str, list[object]]:
-    """Recent per-uid aggregate including each user's distinct editors, for the leaderboard."""
-    if _use_pg(s):
-        return catalog.recent_leaderboard_agg(
-            s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end
-        ), []
-    rsql, rp = _recent_perchangeset(s, prefixes, start, end)
-    return (
-        f"(SELECT uid, count(*) AS changesets, {_SUM_AS}, list(DISTINCT editor) AS editors FROM ({rsql}) GROUP BY uid)",
-        rp,
-    )
-
-
 _SUM_AS = ", ".join(f"SUM({c}) AS {c}" for c in COUNT_COLS)
 _COLS = ", ".join(COUNT_COLS)
 
@@ -357,6 +344,52 @@ def _attach_user_hashtags(
         r["hashtags"] = by_uid.get(r["uid"], [])
 
 
+def _attach_user_editors(
+    con: duckdb.DuckDBPyConnection,
+    rows: list[dict[str, Any]],
+    s: Sources,
+    prefixes: list[tuple[str, str]],
+    start: dt.datetime | None,
+    end: dt.datetime | None,
+) -> None:
+    """In-place: attach the distinct editors each returned user used on their matched changesets, from the
+    rollup (history) and the base changesets (recent). Display-only, so scoped to the returned page."""
+    for r in rows:
+        r["editors"] = []
+    if not rows:
+        return
+    uids = [r["uid"] for r in rows]
+    ph = ", ".join("?" for _ in uids)
+    window_sql, window_params = catalog._window_clause(start, end)
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    hist = (
+        f"SELECT DISTINCT uid, editor FROM {s.history_rel} "
+        f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND uid IN ({ph})"
+    )
+    hist_params = [*prefix_params, s.frontier, *window_params, *uids]
+    if s.pg_attach:
+        rrel = catalog.recent_user_editors(
+            s.pg_attach, uids, prefixes=prefixes, frontier=s.frontier, start=start, end=end
+        )
+        recent, recent_params = f"SELECT uid, editor FROM {rrel}", []
+    else:
+        recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
+        recent = (
+            f"SELECT DISTINCT uid, editor FROM {s.recent_changesets_rel} "
+            f"WHERE created_at >= ?{window_sql} AND uid IN ({ph}) "
+            f"AND EXISTS (SELECT 1 FROM UNNEST(hashtags) AS t(x) WHERE {recent_pred})"
+        )
+        recent_params = [s.frontier, *window_params, *uids, *prefix_params]
+    result = con.execute(
+        f"SELECT uid, list(DISTINCT editor) AS editors FROM ({hist} UNION ALL {recent}) GROUP BY uid",
+        [*hist_params, *recent_params],
+    ).fetchall()
+    by_uid = {uid: list(editors or []) for uid, editors in result}
+    for r in rows:
+        r["editors"] = by_uid.get(r["uid"], [])
+
+
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
 
@@ -402,7 +435,7 @@ def leaderboard(
     )
     count_row = con.execute(count_sql, count_params).fetchone()
     small_history = (count_row[0] if count_row else 0) <= _MAX_TAG_ROWS
-    _q_lb_agg = f"SELECT uid, count(*) AS changesets, {_SUM_AS}, list(DISTINCT editor) AS editors"
+    _q_lb_agg = f"SELECT uid, count(*) AS changesets, {_SUM_AS}"
     if small_history:
         # Small history: materialize once and reuse it for the per-user tag attach.
         con.execute(f"CREATE OR REPLACE TEMP TABLE _hist_cs AS SELECT * FROM ({hsql})", hp)
@@ -417,7 +450,7 @@ def leaderboard(
             hp,
             _cache_path(s, prefixes, "lb_users", start, end),
         )
-    rrel, rp = _recent_leaderboard(s, prefixes, start, end)
+    rrel, rp = _recent_users(s, prefixes, start, end)
     search_pred, search_params = "", []
     if q:
         search_pred = " WHERE lower(name) LIKE ? ESCAPE '\\'"
@@ -426,17 +459,15 @@ def leaderboard(
         f"""
         CREATE OR REPLACE TEMP TABLE _lb_agg AS
         WITH pu AS (
-            SELECT uid, changesets, {_COLS}, editors FROM _q_lb
+            SELECT uid, changesets, {_COLS} FROM _q_lb
             UNION ALL
-            SELECT uid, changesets, {_COLS}, editors FROM {rrel}
+            SELECT uid, changesets, {_COLS} FROM {rrel}
         ),
         c AS (
-            SELECT uid, SUM(changesets) AS changesets, {_SUM_AS},
-                   list_distinct(flatten(list(editors))) AS editors
-            FROM pu GROUP BY uid
+            SELECT uid, SUM(changesets) AS changesets, {_SUM_AS} FROM pu GROUP BY uid
         )
         SELECT c.uid, COALESCE(u.username, 'user ' || c.uid) AS name, c.changesets, {_COLS},
-               {map_changes_expr("c")} AS map_changes, c.editors AS editors
+               {map_changes_expr("c")} AS map_changes
         FROM c LEFT JOIN {s.users_rel} u USING (uid){search_pred}
         """,
         [*rp, *search_params],
@@ -458,6 +489,7 @@ def leaderboard(
     else:
         for r in rows:
             r["tag_stats"] = {}
+    _attach_user_editors(con, rows, s, prefixes, start, end)
     _attach_user_hashtags(con, rows, s, prefixes, start, end)
     return {
         "items": rows,

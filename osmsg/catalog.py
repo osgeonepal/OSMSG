@@ -73,20 +73,6 @@ def recent_user_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     return _pg_query(attach, inner)
 
 
-def recent_leaderboard_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
-    """Per-uid recent aggregate with the distinct editors each user used, for the leaderboard rows."""
-    basis = _pg_perchangeset(prefixes, frontier, start, end, extra=", max(c.editor) AS editor")
-    basis = basis.replace(
-        "FROM m JOIN changeset_stats s USING (changeset_id)",
-        "FROM m JOIN changeset_stats s USING (changeset_id) JOIN changesets c USING (changeset_id)",
-    )
-    inner = (
-        f"{basis} SELECT uid, count(*) AS changesets, {_OSUM}, "
-        f"array_agg(DISTINCT editor) AS editors FROM pc GROUP BY uid"
-    )
-    return _pg_query(attach, inner)
-
-
 def recent_tag_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     """Per (key, value) recent tag breakdown: creates, modifies, length. Powers the tags endpoint."""
     m = _pg_matched(prefixes, frontier, start, end)
@@ -213,6 +199,19 @@ def recent_user_cooccur_hashtags(attach, uids: list[int], *, prefixes, frontier,
     inner = (
         f"SELECT DISTINCT s.uid AS uid, lower(h) AS hashtag "
         f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
+        f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} "
+        f"AND EXISTS (SELECT 1 FROM unnest(c.hashtags) AS x WHERE {ranges})"
+    )
+    return _pg_query(attach, inner)
+
+
+def recent_user_editors(attach, uids: list[int], *, prefixes, frontier, start=None, end=None) -> str:
+    """Per (uid, editor) recent membership: the distinct editors each user used on their matched changesets."""
+    uid_list = ", ".join(str(int(u)) for u in uids)
+    ranges = " OR ".join(f"(lower(x) >= {_pg_str(lo)} AND lower(x) < {_pg_str(hi)})" for lo, hi in prefixes)
+    inner = (
+        f"SELECT DISTINCT s.uid AS uid, c.editor AS editor "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id) "
         f"WHERE s.uid IN ({uid_list}) AND {_pg_user_window(frontier, start, end)} "
         f"AND EXISTS (SELECT 1 FROM unnest(c.hashtags) AS x WHERE {ranges})"
     )

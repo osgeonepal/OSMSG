@@ -205,7 +205,7 @@ def test_recent_pg_aggregates_shape_and_bounds():
     assert "2026-07-01" in user  # frontier lower bound
     assert "GROUP BY uid" in user
     assert "creates" in catalog.recent_tag_agg("pg", **kw)
-    assert "editors" in catalog.recent_leaderboard_agg("pg", **kw)
+    assert "editor" in catalog.recent_user_editors("pg", [1, 2], **kw)
     assert "editor" in catalog.recent_editor_agg("pg", **kw)
     assert "bucket" in catalog.recent_bucket_agg("pg", "day", **kw)
     assert "lon" in catalog.recent_map_agg("pg", **kw)
