@@ -330,6 +330,31 @@ def history_dedup_scope(
     return sql, [*prefix_params, frontier, *window_params]
 
 
+def history_tag_agg(
+    history_rel: str,
+    *,
+    prefixes: list[tuple[str, str]],
+    frontier: dt.datetime,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+) -> tuple[str, list[object]]:
+    """Per (key, value) history tag breakdown, unnest-first so the per-hashtag duplication collapses in a
+    narrow (changeset_id, k, v) aggregate that spills, not a DISTINCT ON holding every tag list."""
+    if not prefixes:
+        raise ValueError("prefixes must be non-empty")
+    window_sql, window_params = _window_clause(start, end)
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    sql = (
+        "SELECT k, v, SUM(c) AS creates, SUM(m) AS modifies, SUM(l) AS length_m FROM ("
+        "SELECT changeset_id, t.k AS k, t.v AS v, ANY_VALUE(t.c) AS c, ANY_VALUE(t.m) AS m, ANY_VALUE(t.l) AS l "
+        f"FROM (SELECT changeset_id, UNNEST(tags) AS t FROM {history_rel} "
+        f"WHERE ({hist_pred}) AND created_at < ?{window_sql}) "
+        "GROUP BY changeset_id, k, v) GROUP BY k, v"
+    )
+    return sql, [*prefix_params, frontier, *window_params]
+
+
 def history_scope_count(
     history_rel: str,
     *,

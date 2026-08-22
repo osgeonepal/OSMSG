@@ -171,6 +171,27 @@ def test_history_side_ignores_recent_rollup_rows():
     assert [r[0] for r in ids] == [1, 2, 3]
 
 
+def test_history_tag_agg_dedups_multi_hashtag_changeset():
+    con = duckdb.connect()
+    con.execute(
+        "CREATE TABLE hc (hashtag VARCHAR, changeset_id BIGINT, created_at TIMESTAMP, "
+        "tags STRUCT(k VARCHAR, v VARCHAR, c BIGINT, m BIGINT, l DOUBLE)[])"
+    )
+    # changeset 1 appears under TWO #hotosm hashtags with identical tags: it must be counted once.
+    con.execute(
+        """INSERT INTO hc VALUES
+        ('#hotosm-project-1', 1, '2026-06-01', [{'k':'building','v':'yes','c':5,'m':1,'l':0.0}]),
+        ('#hotosm-project-2', 1, '2026-06-01', [{'k':'building','v':'yes','c':5,'m':1,'l':0.0}]),
+        ('#hotosm-project-3', 2, '2026-06-01', [{'k':'highway','v':'residential','c':3,'m':0,'l':12.0}])
+        """
+    )
+    lo, hi = "#hotosm", prefix_upper_bound("#hotosm")
+    sql, params = catalog.history_tag_agg("hc", prefixes=[(lo, hi)], frontier=_FRONTIER)
+    rows = {(r[0], r[1]): (r[2], r[3], r[4]) for r in con.execute(sql, params).fetchall()}
+    assert rows[("building", "yes")] == (5, 1, 0.0)  # counted once, not doubled to 10
+    assert rows[("highway", "residential")] == (3, 0, 12.0)
+
+
 def test_recent_pg_aggregates_shape_and_bounds():
     # Each recent aggregate is a Postgres passthrough over the changeset_hashtag prefix index, with the
     # frontier + window inlined and the endpoint's grain in the SELECT.

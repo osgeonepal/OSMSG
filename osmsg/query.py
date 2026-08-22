@@ -481,14 +481,14 @@ def tags(
     [start, end) window."""
     prefixes = _prefixes(hashtag)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
-    hsql, hp = _history(s, prefixes, start, end)
     per_tag = (
         "SELECT t.k AS k, t.v AS v, SUM(t.c) AS creates, SUM(t.m) AS modifies, SUM(t.l) AS length_m "
         "FROM (SELECT UNNEST(tags) AS t FROM {rel}) GROUP BY t.k, t.v"
     )
-    _materialize_history(
-        con, "_q_tg", per_tag.format(rel=f"({hsql})"), hp, _cache_path(s, prefixes, "tags", start, end)
+    hist_tag_sql, hp = catalog.history_tag_agg(
+        s.history_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
     )
+    _materialize_history(con, "_q_tg", hist_tag_sql, hp, _cache_path(s, prefixes, "tags", start, end))
     if s.pg_attach:
         rrel = catalog.recent_tag_agg(s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
         recent_sel, rp = f"SELECT k, v, creates, modifies, length_m FROM {rrel}", []

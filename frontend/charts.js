@@ -161,16 +161,20 @@ let _htPage = 0, _htLen = -1, _htMetric = "users"; // "users" (primary) | "edits
 // A spinner shown in both chart cards while their data loads.
 function setChartsLoading() {
   _ensureChartsSection();
-  const spinner = `<div class="loading-spin"><span class="spin"></span> Loading…</div>`;
+  const rows = Array.from({ length: 5 }, (_, i) => `
+    <div class="ht-row">
+      <div class="ht-head"><span class="skeleton" style="width:${90 - i * 9}px;height:11px"></span><span class="skeleton" style="width:32px;height:11px"></span></div>
+      <div class="ht-bar"><div class="skeleton" style="width:${72 - i * 12}%;height:100%;border-radius:inherit"></div></div>
+    </div>`).join("");
   const ec = document.getElementById("editor-chart-card");
   const ew = ec && ec.querySelector(".osmsg-chart-canvas-wrap");
   const el = document.getElementById("editor-bar-legend");
-  if (ec && ew) { ec.hidden = false; if (el) el.innerHTML = ""; ew.style.height = "auto"; ew.innerHTML = spinner; }
+  if (ec && ew) { ec.hidden = false; if (el) el.innerHTML = ""; ew.style.height = "auto"; ew.innerHTML = rows; }
   const hc = document.getElementById("hashtag-chart-card");
   const hw = document.getElementById("hashtag-canvas-wrap");
   const ht = document.getElementById("hashtag-stat-total");
   const hn = document.getElementById("hashtag-stat-count");
-  if (hc && hw) { hc.hidden = false; if (ht) ht.textContent = ""; if (hn) hn.textContent = ""; hw.style.height = "auto"; hw.innerHTML = spinner; }
+  if (hc && hw) { hc.hidden = false; if (ht) ht.textContent = ""; if (hn) hn.textContent = ""; hw.style.height = "auto"; hw.innerHTML = rows; }
 }
 
 // Render a paginated list (rows + a prev/next footer) into `wrap`; wires the footer buttons to onPage.

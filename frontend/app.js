@@ -50,7 +50,6 @@ const state = {
   osmAvatars: new Map(),
   editorStats: null,
 };
-state.userEditors = new Map();
 
 function fetchOsmAvatar(uid) {
   if (uid == null) return Promise.resolve(null);
@@ -179,7 +178,7 @@ function sumTagKey(ts, k) {
 
 function transform(row) {
   const ts = row.tag_stats || {};
-  const n = (v) => v || 0;  // coalesce so a field the API omits never renders as NaN
+  const n = (v) => v || 0;
   const b = sumTagKey(ts, "building"),
     h = sumTagKey(ts, "highway");
   const lu = sumTagKey(ts, "landuse"),
@@ -232,7 +231,7 @@ function renderChips() {
   chipsEl.innerHTML = state.hashtags
     .map(
       (h, i) =>
-        `<span class="chip">#${escapeHtml(h)}<button type="button" data-i="${i}" aria-label="Remove ${escapeHtml(h)}"><i data-lucide="x"></i></button></span>`
+        `<span class="chip"><span class="chip-label">#${escapeHtml(h)}</span><button type="button" data-i="${i}" aria-label="Remove ${escapeHtml(h)}"><i data-lucide="x"></i></button></span>`
     )
     .join("");
   chipsEl.querySelectorAll("button").forEach(
@@ -590,7 +589,7 @@ async function runQuery() {
   setOverviewLoading();
   showLoading();  // skeleton the table now; the leaderboard fetch only starts after summary resolves
   $("#podium")?.closest("section")?.style.setProperty("display", "");
-  $("#podium").innerHTML = "";
+  setPodiumLoading();
   if (typeof setChartsLoading === "function") setChartsLoading();
   const base = windowParams();
   const alive = () => state.query === ctrl;
@@ -600,8 +599,7 @@ async function runQuery() {
     return p;
   };
   setBusy(true);
-  // Clear the button spinner once the primary content (summary + leaderboard) is up; secondary sections
-  // keep loading behind their own inline status.
+  // The spinner and its stage label stay up across the whole fetch sequence; released in finally.
   let _released = false;
   const releasePrimary = () => { if (!_released) { _released = true; setBusy(false); } };
   try {
@@ -614,7 +612,6 @@ async function runQuery() {
 
     setStatus("Fetching leaderboard…");
     await loadLeaderboardPage(true);
-    releasePrimary();
     if (!alive()) return;
 
     // Each secondary section is isolated so one failure can't blank the others or the primary content.
@@ -727,7 +724,6 @@ function onSectionError(section, err, ctrl) {
   console.warn(`OSMSG ${section} fetch failed:`, err);
 }
 
-// Run one secondary section in isolation so its failure can't abort the query or blank another section.
 async function runSection(name, ctrl, fn) {
   try {
     await fn();
@@ -820,7 +816,7 @@ const OV_CELLS_TOTALS = [
   ["Created", "created", "plus-square", "ov-add", "Elements created (nodes + ways + relations)"],
   ["Modified", "modified", "edit-3", "ov-mod", "Elements modified"],
   ["Deleted", "deleted", "trash-2", "ov-del", "Elements deleted"],
-  ["Mappers", "mappers", "users", "", "Distinct contributors"],
+  ["Contributors", "mappers", "users", "", "Distinct contributors"],
   ["Changesets", "changesets", "git-commit-horizontal", "", "Number of changesets"],
 ];
 const OV_CELLS = [
@@ -963,6 +959,18 @@ function renderOverviewDetails() {
   refreshIcons($("#ov-details"));
 }
 
+function setPodiumLoading() {
+  const el = $("#podium");
+  if (!el) return;
+  el.innerHTML = Array.from({ length: 3 }, (_, i) => `
+    <div class="pod pod-${i + 1}">
+      <span class="pod-rank">${i + 1}</span>
+      <span class="pod-avatar skeleton" style="border:0"></span>
+      <span class="pod-name"><span class="skeleton" style="display:inline-block;width:82px;height:12px"></span></span>
+      <span class="pod-score-wrap"><span class="skeleton" style="display:inline-block;width:60px;height:18px;margin-top:4px"></span></span>
+    </div>`).join("");
+}
+
 function renderPodium() {
   const top3 = state.podium.slice(0, 3);
   const el = $("#podium");
@@ -1012,6 +1020,9 @@ function renderPodium() {
       </div>`;
 
     applyAvatar(div.querySelector(".pod-avatar"), r.uid, initials(r.username));
+    div.tabIndex = 0;
+    div.setAttribute("role", "button");
+    div.setAttribute("aria-label", `${r.username}, rank ${place}`);
     div.addEventListener("click", () => openUserModal(r.username));
     div.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openUserModal(r.username); }
@@ -1133,6 +1144,26 @@ const cellsHtml = (cells, r) =>
     })
     .join("");
 
+let _modalReturnFocus = null;
+// Keep Tab inside an open modal and hand focus back to the trigger on close.
+function trapModalFocus(modal) {
+  _modalReturnFocus = document.activeElement;
+  modal._trap = (e) => {
+    if (e.key !== "Tab") return;
+    const f = modal.querySelectorAll('a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])');
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  modal.addEventListener("keydown", modal._trap);
+}
+function releaseModalFocus(modal) {
+  if (modal._trap) { modal.removeEventListener("keydown", modal._trap); modal._trap = null; }
+  _modalReturnFocus?.focus?.();
+  _modalReturnFocus = null;
+}
+
 function openUserModal(username) {
   // Podium holds the global top 3, which may not be on the current leaderboard page: search both.
   const r =
@@ -1201,6 +1232,7 @@ function openUserModal(username) {
   document.body.style.overflow = "hidden";
   refreshIcons(modal);
   $("#user-modal-close").focus();
+  trapModalFocus(modal);
 }
 
 function closeUserModal() {
@@ -1208,6 +1240,7 @@ function closeUserModal() {
   m.hidden = true;
   m.classList.remove("open");
   document.body.style.overflow = "";
+  releaseModalFocus(m);
 }
 
 function renderTable() {
@@ -1307,8 +1340,8 @@ $("#search").addEventListener("input", (e) => {
   // Search is server-side across all users -> refetch a fresh batch.
   searchTimer = setTimeout(() => loadLeaderboardPage(false, true), 350);
 });
-$$("th.sortable").forEach(
-  (th) => (th.onclick = () => {
+$$("th.sortable").forEach((th) => {
+  const doSort = () => {
     if (!state.hashtags.length) return;
     const k = th.dataset.sort;
     if (state.sort.key === k)
@@ -1316,10 +1349,15 @@ $$("th.sortable").forEach(
     else { state.sort.key = k; state.sort.dir = k === "username" ? "asc" : "desc"; }
     state.page = 1;
     writeURL();
-    // Sorting is server-side across all users -> refetch a fresh batch.
-    loadLeaderboardPage(false, true);
-  })
-);
+    loadLeaderboardPage(false, true);  // server-side sort across all users -> refetch a fresh batch
+  };
+  th.tabIndex = 0;
+  th.setAttribute("role", "button");
+  th.onclick = doSort;
+  th.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); doSort(); }
+  });
+});
 
 // Overview tiles read compact (2.3M) by default; clicking a tile flips its numbers to the exact value.
 $("#overview").addEventListener("click", (e) => {
@@ -1581,7 +1619,7 @@ function readURL() {
   if (tags.length)
     state.hashtags = [...new Set(tags.map((t) => t.replace(/^#/, "").toLowerCase()))];
   const ps = parseInt(p.get("size") || "", 10);
-  if ([10, 25, 50, 100].includes(ps)) {
+  if ([10, 20, 50].includes(ps)) {
     state.pageSize = ps;
     $("#pg-size").value = String(ps);
   }
@@ -1594,7 +1632,7 @@ function writeURL() {
     p.set("end", isoUTC(state.customEnd));
   }
   state.hashtags.forEach((h) => p.append("hashtag", h));
-  if (state.pageSize !== 25) p.set("size", String(state.pageSize));
+  if (state.pageSize !== 10) p.set("size", String(state.pageSize));
   history.replaceState(null, "", `${location.pathname}?${p}`);
 }
 
@@ -1663,6 +1701,7 @@ function openMethodology() {
   document.body.style.overflow = "hidden";
   refreshIcons(mthModal);
   $("#methodology-close")?.focus();
+  trapModalFocus(mthModal);
   if (location.hash !== "#methodology") history.replaceState(null, "", "#methodology");
 }
 function closeMethodology() {
@@ -1670,6 +1709,7 @@ function closeMethodology() {
   mthModal.hidden = true;
   mthModal.classList.remove("open");
   document.body.style.overflow = "";
+  releaseModalFocus(mthModal);
   if (location.hash === "#methodology") history.replaceState(null, "", location.pathname + location.search);
 }
 $("#methodology-link")?.addEventListener("click", (e) => { e.preventDefault(); openMethodology(); });
@@ -1680,15 +1720,8 @@ window.addEventListener("hashchange", () => { if (location.hash === "#methodolog
 if (location.hash === "#methodology") openMethodology();
 
 function boot() {
-  const swaggerURL = `${API_BASE}/docs/swagger`;
-  const apiLink = $("#api-link");
-  if (apiLink) {
-    apiLink.href = swaggerURL;
-    const host = $("#api-host");
-    if (host) host.textContent = new URL(API_BASE).host;
-  }
   const apiDocsLink = $("#api-docs-link");
-  if (apiDocsLink) apiDocsLink.href = swaggerURL;
+  if (apiDocsLink) apiDocsLink.href = `${API_BASE}/docs/swagger`;
   readURL();
   renderChips();
   renderRecentSearches();
