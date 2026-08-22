@@ -1719,9 +1719,24 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape" && mthModal
 window.addEventListener("hashchange", () => { if (location.hash === "#methodology") openMethodology(); });
 if (location.hash === "#methodology") openMethodology();
 
+// Theme is seeded on <html> by the inline head script; this only flips + persists it and swaps the icon.
+function setThemeIcon(t) {
+  const btn = $("#theme-toggle");
+  if (!btn) return;
+  btn.innerHTML = `<i data-lucide="${t === "dark" ? "sun" : "moon"}" class="ico-sm"></i>`;
+  refreshIcons(btn);
+}
+$("#theme-toggle")?.addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("osmsg.theme", next); } catch (e) { console.info("theme not persisted:", e.message); }
+  setThemeIcon(next);
+});
+
 function boot() {
   const apiDocsLink = $("#api-docs-link");
   if (apiDocsLink) apiDocsLink.href = `${API_BASE}/docs/swagger`;
+  setThemeIcon(document.documentElement.dataset.theme || "light");
   readURL();
   renderChips();
   renderRecentSearches();
