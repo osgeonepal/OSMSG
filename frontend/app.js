@@ -616,7 +616,7 @@ async function runQuery() {
 
     // Each secondary section is isolated so one failure can't blank the others or the primary content.
     await runSection("related hashtags", ctrl, async () => {
-      setStatus("Fetching related hashtags…");
+      setStatus("Fetching trending…");
       const trending = await apiGet("hashtags", param({ limit: "50" }), ctrl.signal);
       if (!alive()) return;
       // drop the exact searched tag(s); keep the co-occurring ones
@@ -694,6 +694,7 @@ async function loadLeaderboardPage(setPodium = false, forceFetch = false) {
     const env = await apiGet("leaderboard", p, ctrl.signal);
     state.batch = (env.items || []).map(transform);
     state.batchIndex = batchIndex;
+    state.tagsGated = !!env.tags_gated;
     state.total = env.total || 0;
     state.totalPages = Math.max(1, Math.ceil(state.total / state.pageSize));
     sliceBatchToRows();
@@ -1212,7 +1213,10 @@ function openUserModal(username) {
       </div>
       <div class="ov-breakdown" id="modal-tag-details" hidden style="margin-top:10px">${tagHtml}</div>`;
   } else {
-    html += `<div class="tag-stats-empty" style="margin-top:14px">No detailed tag stats reported for this contributor in this window.</div>`;
+    const emptyMsg = state.tagsGated
+      ? "Per-contributor tag details aren't available yet for very large queries. The overall tag breakdown above still applies."
+      : "No detailed tag stats reported for this contributor in this window.";
+    html += `<div class="tag-stats-empty" style="margin-top:14px">${emptyMsg}</div>`;
   }
 
   $("#user-modal-body").innerHTML = html;

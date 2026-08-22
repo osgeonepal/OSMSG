@@ -465,6 +465,7 @@ def leaderboard(
         "page_size": page_size,
         "total": total,
         "total_pages": (total + page_size - 1) // page_size,
+        "tags_gated": not small_history,
     }
 
 
