@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS changesets (
     max_lat      DOUBLE PRECISION
 );
 CREATE INDEX IF NOT EXISTS idx_changesets_created_at ON changesets USING BTREE (created_at);
+CREATE INDEX IF NOT EXISTS idx_changesets_uid_created ON changesets USING BTREE (uid, created_at);
 CREATE INDEX IF NOT EXISTS idx_changesets_hashtags ON changesets USING GIN (hashtags);
 CREATE INDEX IF NOT EXISTS idx_changesets_editor ON changesets USING BTREE (editor);
 CREATE INDEX IF NOT EXISTS idx_changesets_bbox ON changesets USING GIST (
