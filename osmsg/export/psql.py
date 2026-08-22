@@ -8,6 +8,10 @@ from ..pg_schema import PG_SCHEMA, PG_TAG_TYPE_SQL
 _BULK_INDEXES = [
     ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets USING BTREE (created_at)"),
     (
+        "idx_changesets_uid_created",
+        "CREATE INDEX idx_changesets_uid_created ON changesets USING BTREE (uid, created_at)",
+    ),
+    (
         "idx_changesets_bbox",
         "CREATE INDEX idx_changesets_bbox ON changesets USING GIST "
         "(box(point(min_lon, min_lat), point(max_lon, max_lat)))",

@@ -636,7 +636,9 @@ def trends(
         f"SELECT {bucket} AS bucket, count(*) AS changesets, count(DISTINCT uid) AS users, {map_changes_sum()} "
         "FROM {rel} GROUP BY 1"
     )
-    con.execute(f"CREATE OR REPLACE TEMP TABLE _q_tr AS {per_bucket.format(rel=f'({hsql})')}", hp)
+    _materialize_history(
+        con, "_q_tr", per_bucket.format(rel=f"({hsql})"), hp, _cache_path(s, prefixes, f"trends_{interval}", start, end)
+    )
     if _use_pg(s):
         rrel = catalog.recent_bucket_agg(
             s.pg_attach, interval, prefixes=prefixes, frontier=s.frontier, start=start, end=end

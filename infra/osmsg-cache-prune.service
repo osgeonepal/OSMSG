@@ -1,8 +1,11 @@
 [Unit]
-Description=Prune osmsg replication cache older than 1 day
+Description=Prune osmsg caches (replication diffs + stale query cache)
 
 [Service]
 Type=oneshot
 # Diffs are consumed once (resume state lives in DuckDB, not the filesystem), and DuckDB spill temp is
 # transient, so a day's retention is ample. A longer window let changefiles grow to tens of GB.
 ExecStart=/usr/bin/find /mnt/mnt/osmsg/cache -type f -mtime +1 -delete
+# Query-cache files are keyed by the published frontier, so anything older than the monthly cadence is a
+# stale prior-frontier entry the live path never reads again; 40 days leaves the current month untouched.
+ExecStart=-/usr/bin/find /mnt/mnt/osmsg/ducktmp/querycache -type f -mtime +40 -delete
