@@ -120,6 +120,8 @@ class ChangefileHandler(osmium.SimpleHandler):
         self.stubs: dict[int, Changeset] = {}
         self.stats: dict[int, ChangesetStats] = {}
 
+        self._tracked_keys = set(config.get("additional_tags") or ()) | set(config.get("length") or ())
+
     def _should_collect(self, uname: str, cs_id: int) -> bool:
         if self.valid_changesets is not None and cs_id not in self.valid_changesets:
             return False
@@ -176,8 +178,8 @@ class ChangefileHandler(osmium.SimpleHandler):
                 tv.add(action)
                 if length_m:
                     tv.add_length(length_m)
-        elif cfg["additional_tags"]:
-            for k in cfg["additional_tags"]:
+        elif self._tracked_keys:
+            for k in self._tracked_keys:
                 if k not in tags:
                     continue
                 v = tags[k]
