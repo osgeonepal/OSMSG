@@ -1099,6 +1099,42 @@ span.flatpickr-weekday {
     color: #fff;
 }
 
+/* Today can coincide with a selected or range-end day; flatpickr's .today rule otherwise repaints the number
+   a low-contrast green over the green fill, so keep the selected styling winning here. */
+.flatpickr-day.today.selected,
+.flatpickr-day.today.startRange,
+.flatpickr-day.today.endRange {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+}
+
+.flatpickr-day.today.inRange {
+    background: var(--green-pale);
+    border-color: var(--green-pale);
+    color: var(--green-deep);
+}
+
+/* The dark-mode green is light, so white numbers on a filled day read weakly; use dark ink instead. */
+:root[data-theme="dark"] .flatpickr-day.selected,
+:root[data-theme="dark"] .flatpickr-day.startRange,
+:root[data-theme="dark"] .flatpickr-day.endRange,
+:root[data-theme="dark"] .flatpickr-day.today.selected,
+:root[data-theme="dark"] .flatpickr-day.today.startRange,
+:root[data-theme="dark"] .flatpickr-day.today.endRange {
+    color: #10231a;
+}
+
+/* Selecting the hour/minute field otherwise shows the browser's default blue highlight in a green picker. */
+.flatpickr-calendar input::selection {
+    background: var(--green-pale);
+    color: var(--green-deep);
+}
+
+.flatpickr-time input:focus {
+    background: var(--green-tint);
+}
+
 .flatpickr-day.week.selected {
     background: var(--green);
     border-color: var(--green);
@@ -1596,6 +1632,19 @@ button.ht-tag-add:hover {
     font-weight: 400;
     line-height: 1.6;
     word-break: break-word;
+}
+
+.modal-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.modal-label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
 }
 
 .modal-hashtags {
@@ -2866,6 +2915,13 @@ button.ht-tag-add:hover {
     color: var(--muted);
 }
 
+/* With only the placeholder or error row, the header columns would force a horizontal scroll and push the
+   message off-centre; drop the header until real rows size the table. */
+.table-scroll:has(.empty) thead,
+.table-scroll:has(.errbox) thead {
+    display: none;
+}
+
 .empty [data-lucide] {
     width: 40px;
     height: 40px;
@@ -2927,6 +2983,81 @@ footer {
     padding: 32px 24px calc(32px + env(safe-area-inset-bottom));
     font-size: 13px;
     color: var(--muted);
+}
+
+.support {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-bottom: 24px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--bd);
+}
+
+.support-lead {
+    max-width: 540px;
+}
+
+.support-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--ink-2);
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 6px;
+}
+
+.support-title [data-lucide] {
+    width: 16px;
+    height: 16px;
+    color: var(--green);
+}
+
+.support-lead p {
+    margin: 0;
+    line-height: 1.6;
+}
+
+.support-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.support-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    border: 1px solid var(--bd);
+    border-radius: 8px;
+    color: var(--ink-2);
+    background: var(--surface);
+    white-space: nowrap;
+}
+
+.support-btn [data-lucide] {
+    width: 15px;
+    height: 15px;
+}
+
+.support-btn:hover {
+    border-color: var(--green-soft);
+    color: var(--green);
+}
+
+.support-btn.primary {
+    background: var(--green);
+    color: #fff;
+    border-color: var(--green);
+}
+
+.support-btn.primary:hover {
+    background: var(--green-deep);
+    color: #fff;
 }
 
 .footer-inner {

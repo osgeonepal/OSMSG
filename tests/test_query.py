@@ -105,14 +105,14 @@ def test_leaderboard_includes_per_user_tag_stats(con, sources):
     assert bob["tag_stats"] == {}  # user with no tagged changesets
 
 
-def test_leaderboard_per_user_cooccurring_hashtags(con, sources):
-    # The user modal shows the hashtags each contributor tagged alongside the search (co-occurring):
-    # every hashtag on their matched changesets, so alice's recent changeset also surfaces #waterproject.
+def test_leaderboard_per_user_recent_hashtags(con, sources):
+    # The user modal shows each contributor's RECENT co-occurring hashtags only (the live tail): alice's
+    # recent changeset carries #hotosm-project-2 and the co-tagged #waterproject; bob has no recent activity.
     items = query.leaderboard(con, "hotosm", sources)["items"]
     alice = next(r for r in items if r["name"] == "alice")
-    assert set(alice["hashtags"]) == {"#hotosm-project-1", "#hotosm-project-2", "#waterproject"}
+    assert set(alice["hashtags"]) == {"#hotosm-project-2", "#waterproject"}
     bob = next(r for r in items if r["name"] == "bob")
-    assert bob["hashtags"] == ["#hotosm-project-1"]
+    assert bob["hashtags"] == []
 
 
 def test_cooccurring_hashtags(con, sources):
@@ -125,6 +125,42 @@ def test_cooccurring_hashtags(con, sources):
         {"hashtag": "#hotosm-project-2", "users": 1, "edits": 5},
         {"hashtag": "#waterproject", "users": 1, "edits": 5},
     ]
+
+
+def test_all_time_warm_fills_caches_and_is_idempotent(con, sources, tmp_path):
+    s = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    assert query.all_time_warm_pending(s, "hotosm") is True
+    query.warm_all_time(con, "hotosm", s)
+    assert query.all_time_warm_pending(s, "hotosm") is False
+    # The co-occurring cache is always written; the per-user tags cache is skipped for this non-mega
+    # hashtag (its tags serve inline, so the cache would never be read).
+    assert list(tmp_path.glob("cooccur-*.parquet"))
+    assert not list(tmp_path.glob("lb_tags-*.parquet"))
+    # A second warm is a no-op (cache already present) and does not raise.
+    query.warm_all_time(con, "hotosm", s)
+    # Without a cache dir there is nothing to warm.
+    assert query.all_time_warm_pending(sources, "hotosm") is False
+
+
+def test_trending_from_cooccur_cache_matches_live(con, sources, tmp_path):
+    # The warmed co-occurring cache serves the same all-time trending result as the live self-join.
+    s = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    query.warm_all_time(con, "hotosm", s)
+    assert query.hashtags(con, "hotosm", s) == query.hashtags(con, "hotosm", sources)
+
+
+def test_mega_leaderboard_tags_served_from_cache(con, sources, tmp_path, monkeypatch):
+    # Force the mega path (history rows over the gate): without a cache the per-user tags are gated off;
+    # after a warm the leaderboard serves them from the cache plus the live recent tail.
+    monkeypatch.setattr(query, "_MAX_TAG_ROWS", 1)
+    s = dataclasses.replace(sources, cache_dir=str(tmp_path))
+    query.warm_all_time(con, "hotosm", s)
+    gated = query.leaderboard(con, "hotosm", sources)
+    assert gated["tags_gated"] is True and all(r["tag_stats"] == {} for r in gated["items"])
+    served = query.leaderboard(con, "hotosm", s)
+    assert served["tags_gated"] is False
+    alice = next(r for r in served["items"] if r["name"] == "alice")
+    assert alice["tag_stats"]["building"]["yes"] == {"c": 5, "m": 2}  # 4 history (cache) + 1 recent
 
 
 def _tag_written_both_ways(con) -> None:

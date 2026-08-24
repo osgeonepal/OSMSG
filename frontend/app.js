@@ -1192,7 +1192,7 @@ function openUserModal(username) {
     .filter(Boolean)
     .map((h) => "#" + String(h).replace(/^#/, ""));
   const hashtagLine = userHashtags.length
-    ? `<div class="modal-hashtags">${userHashtags.map((h) => `<span class="mh-chip">${escapeHtml(h)}</span>`).join("")}</div>`
+    ? `<div class="modal-field"><span class="modal-label">Recent hashtags</span><div class="modal-hashtags">${userHashtags.map((h) => `<span class="mh-chip">${escapeHtml(h)}</span>`).join("")}</div></div>`
     : "";
   const modalEditors = (r.editors || []).filter(Boolean);
   const editorText = modalEditors.length ? groupEditorsText(modalEditors) : "Unknown";

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import datetime as dt
+import logging
 import os
 import queue
 import threading
@@ -23,6 +24,7 @@ from osmsg.db.schema import _apply_runtime_pragmas
 from osmsg.history import fetch_manifest
 from osmsg.query import Sources
 
+_log = logging.getLogger("osmsg.api.duck")
 _PG_ATTACH = "pg"
 
 # Warm connections (extensions + Postgres attached) reused across requests so cold-start is paid once;
@@ -127,8 +129,8 @@ def _warm(fn, hashtag, kwargs, key) -> None:
     con = _connect()
     try:
         fn(con, hashtag, _sources(), **kwargs)
-    except duckdb.Error:
-        pass
+    except duckdb.Error as e:
+        _log.warning("cache warm rerun of %s for %r failed: %s", fn.__name__, hashtag, e)
     finally:
         con.close()
         with _warm_lock:
@@ -146,6 +148,31 @@ def _enqueue_warm(fn, hashtag, kwargs) -> None:
             return
         _warm_inflight.add(key)
     _warm_pool.submit(_warm, fn, hashtag, kwargs, key)
+
+
+def _warm_all_time_job(hashtag, key) -> None:
+    con = _connect()
+    try:
+        query.warm_all_time(con, hashtag, _sources())
+    except duckdb.Error as e:
+        _log.warning("all-time warm for %r failed: %s", hashtag, e)
+    finally:
+        con.close()
+        with _warm_lock:
+            _warm_inflight.discard(key)
+
+
+def _maybe_warm_all_time(hashtag) -> None:
+    """Fire a background warm of the all-time history caches (leaderboard per-user tags, trending
+    co-occurring) for this hashtag when any is still cold, deduped per hashtag. No-op when caching is off."""
+    if _QUERY_CACHE_DIR is None or not query.all_time_warm_pending(_sources(), hashtag):
+        return
+    key = ("warm_all_time", repr(hashtag))
+    with _warm_lock:
+        if key in _warm_inflight:
+            return
+        _warm_inflight.add(key)
+    _warm_pool.submit(_warm_all_time_job, hashtag, key)
 
 
 def _run(fn, hashtag, **kwargs):
@@ -202,7 +229,7 @@ async def leaderboard(
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ):
-    return await asyncio.to_thread(
+    res = await asyncio.to_thread(
         _run,
         query.leaderboard,
         hashtag,
@@ -214,6 +241,9 @@ async def leaderboard(
         start=start,
         end=end,
     )
+    if start is None and end is None:
+        _maybe_warm_all_time(hashtag)
+    return res
 
 
 async def tags(
@@ -229,7 +259,10 @@ async def editors(hashtag: str | list[str], *, start: dt.datetime | None = None,
 async def hashtags(
     hashtag: str | list[str], *, limit: int = 15, start: dt.datetime | None = None, end: dt.datetime | None = None
 ):
-    return await asyncio.to_thread(_run, query.hashtags, hashtag, limit=limit, start=start, end=end)
+    res = await asyncio.to_thread(_run, query.hashtags, hashtag, limit=limit, start=start, end=end)
+    if start is None and end is None:
+        _maybe_warm_all_time(hashtag)
+    return res
 
 
 async def trends(

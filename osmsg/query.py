@@ -104,6 +104,84 @@ def _materialize_history(con, temp: str, select_sql: str, params, path: pathlib.
         os.replace(tmp, path)
 
 
+# All-time per-user leaderboard tags are gated off the request path for a mega hashtag and filled by a
+# background warm instead; warm at most this many top contributors so the cache stays small.
+_WARM_TAG_USERS = 500
+
+
+def _warm_leaderboard_tags(con, prefixes: list[tuple[str, str]], s: Sources) -> None:
+    """Compute + cache the per-user history tag breakdown for the top contributors of an all-time mega
+    hashtag, so the leaderboard can serve complete per-user tags (this cache + live recent) on return."""
+    path = _cache_path(s, prefixes, "lb_tags", None, None)
+    if path is None or path.exists():
+        return
+    # Only mega hashtags gate their per-user tags off the request path; smaller ones serve them inline, so
+    # their cache would never be read.
+    count_sql, count_params = catalog.history_scope_count(
+        s.history_rel, prefixes=prefixes, frontier=s.frontier, start=None, end=None
+    )
+    count_row = con.execute(count_sql, count_params).fetchone()
+    if not count_row or count_row[0] <= _MAX_TAG_ROWS:
+        return
+    hsql, hp = _history(s, prefixes, None, None)
+    top = con.execute(
+        f"SELECT uid FROM ({hsql}) GROUP BY uid ORDER BY SUM({map_changes_expr()}) DESC LIMIT {_WARM_TAG_USERS}", hp
+    ).fetchall()
+    if not top:
+        return
+    uid_list = ", ".join(str(int(u)) for (u,) in top)
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    # Unnest-first with a per-changeset dedup so the wide tags struct never flows through a multi-million-row
+    # DISTINCT ON; the uid filter is applied in the scan so only the top contributors' rows are read.
+    sql = (
+        "SELECT uid, k, v, SUM(c) AS c, SUM(m) AS m, SUM(l) AS l FROM ("
+        "SELECT uid, changeset_id, t.k AS k, t.v AS v, ANY_VALUE(t.c) AS c, ANY_VALUE(t.m) AS m, "
+        "ANY_VALUE(t.l) AS l "
+        f"FROM (SELECT uid, changeset_id, UNNEST(tags) AS t FROM {s.history_rel} "
+        f"WHERE ({hist_pred}) AND created_at < ? AND uid IN ({uid_list})) "
+        "GROUP BY uid, changeset_id, k, v) GROUP BY uid, k, v"
+    )
+    _materialize_history(con, "_warm_lb_tags", sql, [*prefix_params, s.frontier], path)
+
+
+def _warm_trending_cooccur(con, prefixes: list[tuple[str, str]], s: Sources) -> None:
+    """Compute + cache the all-time history co-occurring `(hashtag, uid, map_changes)` for a hashtag, so the
+    trending endpoint can serve complete all-time results (this cache + live recent) on return."""
+    path = _cache_path(s, prefixes, "cooccur", None, None)
+    if path is None or path.exists():
+        return
+    prefix_params = [bound for pair in prefixes for bound in pair]
+    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    matched_cs = f"SELECT DISTINCT changeset_id FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?"
+    # Pre-aggregate to one row per (hashtag, uid) so the read stays small and fast; the recent side is also
+    # per (hashtag, uid), so the union re-dedups exactly (a contributor in both sides counts once).
+    sql = (
+        f"SELECT h.hashtag AS hashtag, h.uid AS uid, SUM({map_changes_expr('h')}) AS mc "
+        f"FROM {s.history_rel} h JOIN ({matched_cs}) m USING (changeset_id) WHERE h.created_at < ? "
+        "GROUP BY h.hashtag, h.uid"
+    )
+    _materialize_history(con, "_warm_cooccur", sql, [*prefix_params, s.frontier, s.frontier], path)
+
+
+def warm_all_time(con, hashtag: str | list[str], s: Sources) -> None:
+    """Fill the all-time history caches (leaderboard per-user tags, trending co-occurring) for a hashtag off
+    the request path. Idempotent: each cache is written once per frontier and skipped once present."""
+    prefixes = _prefixes(hashtag)
+    # A warm writes unordered cache files, so drop order preservation to keep these large aggregates spilling
+    # to disk under the memory cap instead of holding the whole result in memory.
+    con.execute("SET preserve_insertion_order=false")
+    _warm_leaderboard_tags(con, prefixes, s)
+    _warm_trending_cooccur(con, prefixes, s)
+
+
+def all_time_warm_pending(s: Sources, hashtag: str | list[str]) -> bool:
+    """True when the all-time warm is worth firing, keyed on the co-occurring cache that every warm writes
+    last. False when caching is off or the warm has already run."""
+    path = _cache_path(s, _prefixes(hashtag), "cooccur", None, None)
+    return path is not None and not path.exists()
+
+
 # The recent tail advances only as the worker ingests, so its aggregate is memoized for this long before a
 # re-scan. Small enough that a public leaderboard is effectively live; large enough to elide repeat scans.
 RECENT_TTL_SECONDS = int(os.getenv("OSMSG_RECENT_TTL_SECONDS", "60"))
@@ -286,6 +364,47 @@ def _attach_user_tags(
             r["tag_stats"] = _tags_to_nested(per_uid[r["uid"]])
 
 
+def _attach_user_tags_cached(
+    con: duckdb.DuckDBPyConnection,
+    rows: list[dict[str, Any]],
+    s: Sources,
+    prefixes: list[tuple[str, str]],
+    start: dt.datetime | None,
+    end: dt.datetime | None,
+) -> bool:
+    """Attach per-user `tag_stats` from the warmed history-tags cache plus the live recent tail. Returns True
+    when the cache was present and used, False to signal the caller to gate."""
+    for r in rows:
+        r["tag_stats"] = {}
+    path = _cache_path(s, prefixes, "lb_tags", start, end)
+    if path is None or not path.exists() or not rows:
+        return False
+    uids = [r["uid"] for r in rows]
+    ph = ", ".join("?" for _ in uids)
+    hist = f"SELECT uid, k, v, c, m, l FROM read_parquet('{path.as_posix()}') WHERE uid IN ({ph})"
+    if s.pg_attach:
+        rrel = catalog.recent_user_tags(s.pg_attach, uids, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
+        recent, params = f"SELECT uid, k, v, c, m, l FROM {rrel}", [*uids]
+    else:
+        rsql, rp = _recent_perchangeset(s, prefixes, start, end)
+        recent = (
+            f"SELECT uid, t.k AS k, t.v AS v, t.c AS c, t.m AS m, t.l AS l "
+            f"FROM (SELECT uid, UNNEST(tags) AS t FROM ({rsql}) WHERE uid IN ({ph}))"
+        )
+        params = [*uids, *rp, *uids]
+    tag_rows = con.execute(
+        f"SELECT uid, k, v, SUM(c) AS c, SUM(m) AS m, SUM(l) AS l FROM ({hist} UNION ALL {recent}) GROUP BY uid, k, v",
+        params,
+    ).fetchall()
+    per_uid: dict[Any, list[dict[str, Any]]] = {}
+    for uid, k, v, c, m, length_m in tag_rows:
+        per_uid.setdefault(uid, []).append({"k": k, "v": v, "c": c, "m": m, "l": length_m})
+    for r in rows:
+        if per_uid.get(r["uid"]):
+            r["tag_stats"] = _tags_to_nested(per_uid[r["uid"]])
+    return True
+
+
 def _attach_user_hashtags(
     con: duckdb.DuckDBPyConnection,
     rows: list[dict[str, Any]],
@@ -294,35 +413,22 @@ def _attach_user_hashtags(
     start: dt.datetime | None,
     end: dt.datetime | None,
 ) -> None:
-    """In-place: attach the hashtags each returned user tagged alongside the search (co-occurring), i.e.
-    every hashtag carried by that user's matched changesets, from the rollup (history) and the base
-    changesets list (recent). Reveals which other projects and campaigns each contributor worked on."""
+    """In-place: attach each returned user's RECENT co-occurring hashtags from the live tail only (shown as
+    "Recent hashtags" in the UI); the all-time aggregate is served by the /hashtags endpoint."""
     for r in rows:
         r["hashtags"] = []
     if not rows:
         return
     uids = [r["uid"] for r in rows]
-    ph = ", ".join("?" for _ in uids)
-    window_sql, window_params = catalog._window_clause(start, end)
-    prefix_params = [bound for pair in prefixes for bound in pair]
-    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
-    matched_cs = (
-        f"SELECT DISTINCT changeset_id FROM {s.history_rel} "
-        f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND uid IN ({ph})"
-    )
-    hist = (
-        f"SELECT h.uid, h.hashtag FROM {s.history_rel} h JOIN ({matched_cs}) m USING (changeset_id) "
-        f"WHERE h.created_at < ?{window_sql}"
-    )
-    hist_params = [*prefix_params, s.frontier, *window_params, *uids, s.frontier, *window_params]
-    hist_cheap = _cooccur_history_cheap(con, s, start, end)
     if s.pg_attach:
         rrel = catalog.recent_user_cooccur_hashtags(
             s.pg_attach, uids, prefixes=prefixes, frontier=s.frontier, start=start, end=end
         )
-        recent = f"SELECT uid, hashtag FROM {rrel}"
-        recent_params: list[object] = []
+        recent, params = f"SELECT uid, hashtag FROM {rrel}", []
     else:
+        ph = ", ".join("?" for _ in uids)
+        window_sql, window_params = catalog._window_clause(start, end)
+        prefix_params = [bound for pair in prefixes for bound in pair]
         recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
         recent = (
             f"SELECT uid, lower(h) AS hashtag FROM (SELECT uid, UNNEST(hashtags) AS h "
@@ -330,13 +436,9 @@ def _attach_user_hashtags(
             f"WHERE created_at >= ?{window_sql} AND uid IN ({ph}) "
             f"AND EXISTS (SELECT 1 FROM UNNEST(hashtags) AS t(x) WHERE {recent_pred}))"
         )
-        recent_params = [s.frontier, *window_params, *uids, *prefix_params]
-    if hist_cheap:
-        combined, params = f"{hist} UNION ALL {recent}", [*hist_params, *recent_params]
-    else:
-        combined, params = recent, recent_params
+        params = [s.frontier, *window_params, *uids, *prefix_params]
     result = con.execute(
-        f"SELECT uid, list(DISTINCT hashtag) AS hashtags FROM ({combined}) GROUP BY uid",
+        f"SELECT uid, list(DISTINCT hashtag) AS hashtags FROM ({recent}) GROUP BY uid",
         params,
     ).fetchall()
     by_uid = {uid: list(hashtags or []) for uid, hashtags in result}
@@ -435,21 +537,12 @@ def leaderboard(
     )
     count_row = con.execute(count_sql, count_params).fetchone()
     small_history = (count_row[0] if count_row else 0) <= _MAX_TAG_ROWS
+    # Counts stream narrow (no tags struct through the dedup) so the aggregate stays cheap; per-user tags
+    # are attached for the returned page alone. All-time memoizes the aggregate.
     _q_lb_agg = f"SELECT uid, count(*) AS changesets, {_SUM_AS}"
-    if small_history:
-        # Small history: materialize once and reuse it for the per-user tag attach.
-        con.execute(f"CREATE OR REPLACE TEMP TABLE _hist_cs AS SELECT * FROM ({hsql})", hp)
-        con.execute(f"CREATE OR REPLACE TEMP TABLE _q_lb AS {_q_lb_agg} FROM _hist_cs GROUP BY uid")
-    else:
-        # Mega history: stream the dedup straight into the per-user aggregate (materializing the wide
-        # multi-million-row history would blow up), and memoize it, this is the slow case the cache targets.
-        _materialize_history(
-            con,
-            "_q_lb",
-            f"{_q_lb_agg} FROM ({hsql}) GROUP BY uid",
-            hp,
-            _cache_path(s, prefixes, "lb_users", start, end),
-        )
+    _materialize_history(
+        con, "_q_lb", f"{_q_lb_agg} FROM ({hsql}) GROUP BY uid", hp, _cache_path(s, prefixes, "lb_users", start, end)
+    )
     rrel, rp = _recent_users(s, prefixes, start, end)
     search_pred, search_params = "", []
     if q:
@@ -485,10 +578,14 @@ def leaderboard(
     for i, r in enumerate(rows):
         r["rank"] = offset + i + 1
     if small_history:
-        _attach_user_tags(con, rows, s, prefixes, start, end, hist_rel="_hist_cs")
+        _attach_user_tags(con, rows, s, prefixes, start, end)
+        tags_gated = False
+    elif _attach_user_tags_cached(con, rows, s, prefixes, start, end):
+        tags_gated = False
     else:
         for r in rows:
             r["tag_stats"] = {}
+        tags_gated = True
     _attach_user_editors(con, rows, s, prefixes, start, end)
     _attach_user_hashtags(con, rows, s, prefixes, start, end)
     return {
@@ -497,7 +594,7 @@ def leaderboard(
         "page_size": page_size,
         "total": total,
         "total_pages": (total + page_size - 1) // page_size,
-        "tags_gated": not small_history,
+        "tags_gated": tags_gated,
     }
 
 
@@ -602,22 +699,26 @@ def hashtags(
     parts: list[str] = []
     params: list[object] = []
 
-    # History side: every hashtag carried by a matched changeset, via a self-join on changeset_id.
-    # Gated by a cheap count so a mega-hashtag over history does not scan the whole rollup.
-    hc_sql, hc_params = catalog.history_scope_count(
-        s.history_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
-    )
-    hc_row = con.execute(hc_sql, hc_params).fetchone()
-    hist_count = hc_row[0] if hc_row else 0
-    if 0 < hist_count <= _MAX_TAG_ROWS and _cooccur_history_cheap(con, s, start, end):
-        matched_cs = (
-            f"SELECT DISTINCT changeset_id FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?{window_sql}"
+    # History side: co-occurring hashtags via a changeset_id self-join. All-time reads the warmed cache when
+    # present; otherwise a cheap count gates it so a mega-hashtag does not scan the whole rollup.
+    cooccur_path = _cache_path(s, prefixes, "cooccur", start, end)
+    if cooccur_path is not None and cooccur_path.exists():
+        parts.append(f"SELECT hashtag, uid, mc FROM read_parquet('{cooccur_path.as_posix()}')")
+    else:
+        hc_sql, hc_params = catalog.history_scope_count(
+            s.history_rel, prefixes=prefixes, frontier=s.frontier, start=start, end=end
         )
-        parts.append(
-            f"SELECT h.hashtag AS hashtag, h.uid AS uid, {map_changes_expr('h')} AS mc "
-            f"FROM {s.history_rel} h JOIN ({matched_cs}) m USING (changeset_id) WHERE h.created_at < ?{window_sql}"
-        )
-        params += [*prefix_params, s.frontier, *window_params, s.frontier, *window_params]
+        hc_row = con.execute(hc_sql, hc_params).fetchone()
+        hist_count = hc_row[0] if hc_row else 0
+        if 0 < hist_count <= _MAX_TAG_ROWS and _cooccur_history_cheap(con, s, start, end):
+            matched_cs = (
+                f"SELECT DISTINCT changeset_id FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?{window_sql}"
+            )
+            parts.append(
+                f"SELECT h.hashtag AS hashtag, h.uid AS uid, {map_changes_expr('h')} AS mc "
+                f"FROM {s.history_rel} h JOIN ({matched_cs}) m USING (changeset_id) WHERE h.created_at < ?{window_sql}"
+            )
+            params += [*prefix_params, s.frontier, *window_params, s.frontier, *window_params]
 
     # Recent side: every hashtag carried by a matched changeset in the live tail.
     if _use_pg(s):
