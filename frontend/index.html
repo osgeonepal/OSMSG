@@ -44,7 +44,8 @@
         </span>
       </a>
       <div class="header-tools">
-        <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle light or dark theme" title="Toggle theme">
+        <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Toggle light or dark theme"
+          title="Toggle theme">
           <i data-lucide="moon" class="ico-sm"></i>
         </button>
         <div class="clock-pill" id="header-clock" aria-label="Local time">
@@ -60,7 +61,8 @@
     <form id="query-form" class="search-card" autocomplete="off">
       <div class="field">
         <label for="hashtag-input"><i data-lucide="hash" class="ico-sm"></i> Hashtags
-          <span class="info-tip" tabindex="0" role="img" aria-label="Press Enter to add a hashtag. Leave empty for global stats. Multiple hashtags are OR-combined."
+          <span class="info-tip" tabindex="0" role="img"
+            aria-label="Press Enter to add a hashtag. Leave empty for global stats. Multiple hashtags are OR-combined."
             data-tip="Type a hashtag and press Enter to add it. Add several to combine them. Then hit Extract.">
             <i data-lucide="info" class="ico-sm"></i>
           </span>
@@ -110,13 +112,12 @@
   <div class="windowbar">
     <div class="wb-item" id="wb-window"><i data-lucide="calendar-range" class="ico-sm"></i><span
         class="k">Window</span><span class="v" id="wb-window-text">…</span></div>
-    <div class="wb-item" id="last-updated" role="button" tabindex="0"
-        title="Click to refresh" style="cursor:pointer"><i data-lucide="refresh-cw" class="ico-sm"></i><span
-        class="k">Updated</span><span class="v" id="last-updated-text">never</span></div>
+    <div class="wb-item" id="last-updated" role="button" tabindex="0" title="Click to refresh" style="cursor:pointer"><i
+        data-lucide="refresh-cw" class="ico-sm"></i><span class="k">Updated</span><span class="v"
+        id="last-updated-text">never</span></div>
     <div class="wb-right">
       <span class="ov-breakdown-meta" id="ov-breakdown-meta"></span>
-      <button type="button" class="ov-toggle-btn" id="ov-toggle-btn" aria-expanded="false"
-        aria-controls="ov-details">
+      <button type="button" class="ov-toggle-btn" id="ov-toggle-btn" aria-expanded="false" aria-controls="ov-details">
         <span id="ov-toggle-label">Show details</span><span class="ov-caret" aria-hidden="true">▾</span>
       </button>
     </div>
@@ -235,7 +236,8 @@
           <h3><i data-lucide="shapes"></i> Feature breakdowns</h3>
           <p>Edits are also grouped by what was mapped, using the element's main tag: buildings, highways, waterways,
             landuse, natural features, amenities, and points of interest. Each shows
-            <span class="mth-tok">+ created</span> and <span class="mth-tok">~ modified</span>.</p>
+            <span class="mth-tok">+ created</span> and <span class="mth-tok">~ modified</span>.
+          </p>
         </section>
 
         <section class="mth-sec">
@@ -254,7 +256,8 @@
           <h3><i data-lucide="hash"></i> Hashtags</h3>
           <p>Hashtags are matched by prefix, so <code>osmnepal</code> also includes
             <code>osmnepal-project-123</code> and similar. Add several hashtags to combine them: a changeset that
-            carries any of them is included, and each changeset is counted once even if it uses more than one.</p>
+            carries any of them is included, and each changeset is counted once even if it uses more than one.
+          </p>
         </section>
 
         <section class="mth-sec">
@@ -270,8 +273,8 @@
           <p class="mth-links">
             <a href="https://github.com/osgeonepal/osmsg" target="_blank" rel="noopener"><i data-lucide="github"></i>
               Source code</a>
-            <a href="https://github.com/osgeonepal/osmsg/blob/master/docs/Manual.md" target="_blank"
-              rel="noopener"><i data-lucide="book-open"></i> Manual</a>
+            <a href="https://github.com/osgeonepal/osmsg/blob/master/docs/Manual.md" target="_blank" rel="noopener"><i
+                data-lucide="book-open"></i> Manual</a>
             <a href="https://www.openstreetmap.org" target="_blank" rel="noopener"><i data-lucide="map"></i>
               OpenStreetMap</a>
           </p>
@@ -289,8 +292,9 @@
       </div>
       <div class="support-actions">
         <a class="support-btn" href="mailto:info@osgeonepal.org"><i data-lucide="mail"></i> info@osgeonepal.org</a>
-        <a class="support-btn primary" href="https://osgeonepal.org" target="_blank" rel="noopener"><i
-            data-lucide="heart"></i> Support / Donate</a>
+        <a class="support-btn primary" href="https://github.com/sponsors/kshitijrajsharma" target="_blank"
+          rel="noopener"><i data-lucide="heart"></i> Support / Donate</a>
+        // Todo : later replace link with osgeo sponsorship once available
       </div>
     </div>
     <div class="footer-inner">
@@ -316,7 +320,9 @@
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="export-progress" class="export-progress" role="status" aria-live="polite" hidden>
     <div class="ep-label"><i data-lucide="download" class="ico-sm"></i> Building CSV…</div>
-    <div class="ep-bar"><div class="ep-fill" id="export-progress-fill"></div></div>
+    <div class="ep-bar">
+      <div class="ep-fill" id="export-progress-fill"></div>
+    </div>
     <div class="ep-count" id="export-progress-count"></div>
   </div>
   <script src="app.js" defer></script>
