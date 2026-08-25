@@ -151,12 +151,12 @@ function _ensureChartsSection() {
 
 
 const _PER_PAGE = 5;
-let _edPage = 0, _edLen = -1, _edMetric = "users"; // "users" (primary) | "edits"
+let _edPage = 0, _edLen = -1;
 const _edExpanded = new Set(); // editor families expanded to show their versions
 // Editor family for grouping: a known family (iD, JOSM, ...) or the token before the first "/" or space.
 const editorGroup = (s) =>
   (typeof editorFamily === "function" && editorFamily(s)) || String(s || "Unknown").split(/[/\s]/)[0] || "Unknown";
-let _htPage = 0, _htLen = -1, _htMetric = "users"; // "users" (primary) | "edits"
+let _htPage = 0, _htLen = -1;
 
 // A spinner shown in both chart cards while their data loads.
 function setChartsLoading() {
@@ -210,8 +210,7 @@ function renderEditorBarChart() {
   if (!src.length) { _edPage = 0; _edLen = -1; card.hidden = true; return; }
   card.hidden = false;
 
-  const byUsers = _edMetric === "users";
-  const valueOf = (r) => (byUsers ? (r.users || 0) : (r.changes || 0));
+  const valueOf = (r) => r.users || 0;
 
   // Group editor versions by family so the default view is compact; a family expands to its versions.
   const groups = new Map();
@@ -225,17 +224,9 @@ function renderEditorBarChart() {
   const all = [...groups.values()].sort((a, b) => valueOf(b) - valueOf(a));
   if (all.length !== _edLen) { _edPage = 0; _edLen = all.length; }
 
-  const fmtVal = byUsers ? ((n) => fmt.format(n)) : ((typeof compact === "function") ? compact : fmt.format);
+  const fmtVal = (n) => fmt.format(n);
   const gmax = Math.max(...all.map(valueOf), 1);
-  legendEl.innerHTML = `
-    <span class="osmsg-sub">${byUsers ? "Contributors per editor" : "Edits per editor"}</span>
-    <span class="metric-mini" role="group" aria-label="Editor metric">
-      <button type="button" class="mm-btn${byUsers ? " active" : ""}" data-metric="users" title="Rank editors by number of contributors">Users</button>
-      <button type="button" class="mm-btn${byUsers ? "" : " active"}" data-metric="edits" title="Rank editors by map changes (edits)">Edits</button>
-    </span>`;
-  legendEl.querySelectorAll(".mm-btn").forEach((b) => {
-    b.onclick = () => { _edMetric = b.dataset.metric; _edPage = 0; renderEditorBarChart(); };
-  });
+  legendEl.innerHTML = `<span class="osmsg-sub">Contributors per editor</span>`;
 
   const subRow = (v, max) => `
     <div class="ht-row ht-sub">
@@ -282,28 +273,19 @@ function renderHashtagPieChart() {
 
   const src = (state.hashtagTrends || [])
     .filter((e) => e && e.hashtag && e.users > 0)
-    .map((e) => ({ tag: "#" + String(e.hashtag).replace(/^#/, ""), users: e.users || 0, edits: e.edits || 0 }));
+    .map((e) => ({ tag: "#" + String(e.hashtag).replace(/^#/, ""), users: e.users || 0 }));
 
   if (src.length < 2) { _htPage = 0; _htLen = -1; card.hidden = true; return; }
   card.hidden = false;
 
-  const byUsers = _htMetric === "users";
-  const valueOf = (e) => (byUsers ? e.users : e.edits);
+  const valueOf = (e) => e.users;
   const trends = src.slice().sort((a, b) => valueOf(b) - valueOf(a));
   if (trends.length !== _htLen) { _htPage = 0; _htLen = trends.length; }
 
-  const fmtVal = byUsers ? ((n) => fmt.format(n)) : ((typeof compact === "function") ? compact : fmt.format);
+  const fmtVal = (n) => fmt.format(n);
   const gmax = Math.max(...trends.map(valueOf), 1);
-  if (totalEl) totalEl.textContent = byUsers ? "Contributors per hashtag" : "Map changes per hashtag";
-  if (countEl) {
-    countEl.innerHTML = `<span class="metric-mini" role="group" aria-label="Hashtag metric">
-      <button type="button" class="mm-btn${byUsers ? " active" : ""}" data-metric="users" title="Rank hashtags by number of contributors">Users</button>
-      <button type="button" class="mm-btn${byUsers ? "" : " active"}" data-metric="edits" title="Rank hashtags by map changes (edits)">Edits</button>
-    </span>`;
-    countEl.querySelectorAll(".mm-btn").forEach((b) => {
-      b.onclick = () => { _htMetric = b.dataset.metric; _htPage = 0; renderHashtagPieChart(); };
-    });
-  }
+  if (totalEl) totalEl.textContent = "Contributors per hashtag";
+  if (countEl) countEl.innerHTML = "";
   const rowFn = (e, max) => `
     <div class="ht-row">
       <div class="ht-head">

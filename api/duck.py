@@ -6,6 +6,7 @@ materialized recent rollup; the split frontier is re-read on a TTL so a newly pu
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import datetime as dt
 import logging
@@ -44,6 +45,9 @@ _ROLLUP = os.getenv("OSMSG_ROLLUP_BASE", f"{_HISTORY_URL}/rollup")
 _HASHTAG_CHANGESET = os.getenv("OSMSG_HASHTAG_CHANGESET", f"{_ROLLUP}/hashtag_changeset/data.parquet")
 _USERS = os.getenv("OSMSG_USERS", f"{_ROLLUP}/users/data.parquet")
 _FRONTIER_TTL_SECONDS = int(os.getenv("OSMSG_FRONTIER_TTL_SECONDS", "3600"))
+# work_mem for the API's own pooled Postgres connections only (not the worker, not the db global config), so
+# the heaviest global aggregate stays mostly in memory instead of spilling. Sized to the pool + db cap.
+_PG_WORK_MEM = os.getenv("OSMSG_PG_WORK_MEM", "64MB")
 
 _frontier_cache: tuple[float, dt.datetime] | None = None
 
@@ -58,7 +62,8 @@ def _libpq_dsn() -> str:
         "user": u.username,
         "password": u.password,
     }
-    return " ".join(f"{k}={v}" for k, v in parts.items() if v is not None)
+    dsn = " ".join(f"{k}={v}" for k, v in parts.items() if v is not None)
+    return f"{dsn} options='-c work_mem={_PG_WORK_MEM}'"
 
 
 def _frontier() -> dt.datetime:
@@ -81,7 +86,7 @@ def _connect() -> duckdb.DuckDBPyConnection:
     con.execute("SET http_retries=10;")
     # Memory/temp pragmas so concurrent pooled queries cannot sum past the container memory cap.
     _apply_runtime_pragmas(con)
-    con.execute(f"ATTACH '{_libpq_dsn()}' AS pg (TYPE postgres, READ_ONLY)")
+    con.execute(f"ATTACH '{_libpq_dsn().replace(chr(39), chr(39) * 2)}' AS pg (TYPE postgres, READ_ONLY)")
     return con
 
 
@@ -279,3 +284,109 @@ async def map_points(
     hashtag: str | list[str], *, limit: int = 2000, start: dt.datetime | None = None, end: dt.datetime | None = None
 ):
     return await asyncio.to_thread(_run, query.map_points, hashtag, limit=limit, start=start, end=end)
+
+
+def _run_global(fn, **kwargs):
+    """Like _run but for the no-hashtag global endpoints: runs fn(con, _sources(), **kwargs) under the
+    watchdog on a pooled connection. No warm path (global windows are recent, uncached)."""
+    pool = _pool_ready()
+    con = _acquire(pool)
+    done = threading.Event()
+    interrupted = False
+
+    def _watchdog() -> None:
+        nonlocal interrupted
+        if not done.wait(_QUERY_TIMEOUT):
+            interrupted = True
+            with contextlib.suppress(duckdb.Error):
+                con.interrupt()
+
+    watcher = threading.Thread(target=_watchdog, daemon=True)
+    watcher.start()
+    healthy = True
+    try:
+        return fn(con, _sources(), **kwargs)
+    except duckdb.Error:
+        healthy = False
+        if interrupted:
+            raise HTTPException(status_code=503, detail="Server is busy, please try again in a moment.") from None
+        raise
+    finally:
+        done.set()
+        watcher.join()
+        if healthy:
+            pool.put(con)
+        else:
+            with contextlib.suppress(duckdb.Error):
+                con.close()
+            pool.put(_connect())
+
+
+# Memoize whole-OSM results by a grain-rounded window so repeat hits are instant.
+_GLOBAL_CACHE_TTL = float(os.getenv("OSMSG_GLOBAL_CACHE_TTL", "120"))
+_GLOBAL_GRAIN = 60
+_global_cache: collections.OrderedDict[tuple, tuple[float, object]] = collections.OrderedDict()
+_global_cache_lock = threading.Lock()
+
+
+def _round_window(start: dt.datetime, end: dt.datetime) -> tuple[dt.datetime, dt.datetime]:
+    def floor(t: dt.datetime) -> dt.datetime:
+        return t.replace(second=(t.second // _GLOBAL_GRAIN) * _GLOBAL_GRAIN, microsecond=0)
+
+    return floor(start), floor(end)
+
+
+async def _global_cached(fn, key_extra, start, end, **kwargs):
+    rs, re = _round_window(start, end)
+    key = (fn.__name__, rs, re, key_extra)
+    now = time.monotonic()
+    with _global_cache_lock:
+        hit = _global_cache.get(key)
+        if hit and hit[0] > now:
+            _global_cache.move_to_end(key)
+            return hit[1]
+    result = await asyncio.to_thread(_run_global, fn, start=rs, end=re, **kwargs)
+    with _global_cache_lock:
+        _global_cache[key] = (now + _GLOBAL_CACHE_TTL, result)
+        while len(_global_cache) > 512:
+            _global_cache.popitem(last=False)
+    return result
+
+
+async def global_summary(*, start: dt.datetime, end: dt.datetime):
+    return await _global_cached(query.global_summary, None, start, end)
+
+
+async def global_leaderboard(
+    *,
+    start: dt.datetime,
+    end: dt.datetime,
+    page: int = 1,
+    page_size: int = query.DEFAULT_PAGE_SIZE,
+    sort: str = "map_changes",
+    order: str = "desc",
+    q: str | None = None,
+):
+    return await _global_cached(
+        query.global_leaderboard,
+        (page, page_size, sort, order, q),
+        start,
+        end,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        order=order,
+        q=q,
+    )
+
+
+async def global_editors(*, start: dt.datetime, end: dt.datetime):
+    return await _global_cached(query.global_editors, None, start, end)
+
+
+async def global_tags(*, start: dt.datetime, end: dt.datetime, limit: int = 100):
+    return await _global_cached(query.global_tags, limit, start, end, limit=limit)
+
+
+async def global_trending(*, start: dt.datetime, end: dt.datetime, limit: int = 15):
+    return await _global_cached(query.global_trending, limit, start, end, limit=limit)

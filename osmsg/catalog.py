@@ -155,6 +155,82 @@ def recent_map_agg(attach, *, prefixes, frontier, start=None, end=None) -> str:
     return _pg_query(attach, inner)
 
 
+# Whole-OSM (no-hashtag) aggregates over a recent window, from Postgres.
+
+
+def _pg_global_window(start: dt.datetime, end: dt.datetime) -> str:
+    if start is None or end is None:
+        raise ValueError("global scope requires a bounded [start, end) window")
+    return f"c.created_at >= {_pg_ts(start)} AND c.created_at < {_pg_ts(end)}"
+
+
+def _pg_uid_list(uids: list[int]) -> str:
+    return ", ".join(str(int(u)) for u in uids)
+
+
+def global_user_agg(attach, *, start, end) -> str:
+    inner = (
+        f"SELECT s.uid AS uid, count(DISTINCT s.changeset_id) AS changesets, {_PSUM} "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id) "
+        f"WHERE {_pg_global_window(start, end)} GROUP BY s.uid"
+    )
+    return _pg_query(attach, inner)
+
+
+def global_editor_agg(attach, *, start, end) -> str:
+    inner = (
+        f"SELECT COALESCE(NULLIF(c.editor, ''), 'unknown') AS editor, s.uid AS uid, "
+        f"count(DISTINCT s.changeset_id) AS cs, sum({_MC}) AS map_changes "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id) "
+        f"WHERE {_pg_global_window(start, end)} GROUP BY 1, s.uid"
+    )
+    return _pg_query(attach, inner)
+
+
+def global_tag_agg(attach, *, start, end) -> str:
+    inner = (
+        "SELECT (t).k AS k, (t).v AS v, sum((t).c) AS creates, sum((t).m) AS modifies, sum((t).l) AS length_m "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(s.tags) AS t "
+        f"WHERE {_pg_global_window(start, end)} GROUP BY (t).k, (t).v"
+    )
+    return _pg_query(attach, inner)
+
+
+def global_user_tags(attach, uids: list[int], *, start, end) -> str:
+    inner = (
+        "SELECT s.uid AS uid, (t).k AS k, (t).v AS v, sum((t).c) AS c, sum((t).m) AS m, sum((t).l) AS l "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(s.tags) AS t "
+        f"WHERE s.uid IN ({_pg_uid_list(uids)}) AND {_pg_global_window(start, end)} GROUP BY s.uid, (t).k, (t).v"
+    )
+    return _pg_query(attach, inner)
+
+
+def global_user_editors(attach, uids: list[int], *, start, end) -> str:
+    inner = (
+        "SELECT DISTINCT s.uid AS uid, c.editor AS editor "
+        "FROM changeset_stats s JOIN changesets c USING (changeset_id) "
+        f"WHERE s.uid IN ({_pg_uid_list(uids)}) AND {_pg_global_window(start, end)}"
+    )
+    return _pg_query(attach, inner)
+
+
+def global_user_hashtags(attach, uids: list[int], *, start, end) -> str:
+    inner = (
+        "SELECT DISTINCT s.uid AS uid, lower(h) AS hashtag "
+        f"FROM changeset_stats s JOIN changesets c USING (changeset_id), unnest(c.hashtags) AS h "
+        f"WHERE s.uid IN ({_pg_uid_list(uids)}) AND {_pg_global_window(start, end)}"
+    )
+    return _pg_query(attach, inner)
+
+
+def global_trending(attach, *, start, end) -> str:
+    inner = (
+        "SELECT lower(h) AS hashtag, count(DISTINCT c.changeset_id) AS changesets, count(DISTINCT c.uid) AS users "
+        f"FROM changesets c, unnest(c.hashtags) AS h WHERE {_pg_global_window(start, end)} GROUP BY 1"
+    )
+    return _pg_query(attach, inner)
+
+
 def _pg_user_window(frontier, start, end) -> str:
     bounds = [f"c.created_at >= {_pg_ts(frontier)}"]
     if start is not None:

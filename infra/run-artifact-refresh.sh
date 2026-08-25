@@ -9,6 +9,9 @@ cd /opt/osmsg/infra
 artifact_host="${OSMSG_ARTIFACT_DIR:-/mnt/mnt/osmsg/artifact}"
 dsn="${OSMSG_PSQL_DSN:-postgresql://osmsg:osmsg@db:5432/osmsg}"
 repo="${OSMSG_HISTORY_REPO:-kshitijrajsharma/osmsg-history}"
+# Keep ~a month beyond the frontier so global recent-window queries (<=30d) always find their
+# pre-frontier days in Postgres; anything older is served from published history.
+overlap_days="${OSMSG_PRUNE_OVERLAP_DAYS:-40}"
 
 echo "[artifact-refresh] advancing ${artifact_host} from ${repo}"
 # Cap Xet download concurrency so its reconstruction buffers stay well within the container memory limit.
@@ -18,6 +21,6 @@ docker compose run --rm -e HF_XET_CLIENT_AC_MAX_DOWNLOAD_CONCURRENCY=4 -v "${art
 echo "[artifact-refresh] reloading the API onto the advanced frontier"
 docker compose restart api
 
-echo "[artifact-refresh] pruning Postgres to the local frontier"
+echo "[artifact-refresh] pruning Postgres, keeping ${overlap_days}d beyond the frontier"
 exec docker compose run --rm -v "${artifact_host}:/artifact" --entrypoint osmsg worker \
-  maintain prune-pg --psql-dsn "${dsn}" --history-url /artifact
+  maintain prune-pg --psql-dsn "${dsn}" --history-url /artifact --overlap-days "${overlap_days}"

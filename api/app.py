@@ -12,6 +12,7 @@ from litestar.static_files import create_static_files_router
 
 from .db import close_pool, ensure_schema, open_pool
 from .queries import fetch_state
+from .routers.global_stats import global_router
 from .routers.hashtag import v2_router
 from .schemas import HealthResponse
 
@@ -95,7 +96,7 @@ async def health() -> HealthResponse:
 
 
 app = Litestar(
-    route_handlers=[*_root_handlers(), health, v2_router],
+    route_handlers=[*_root_handlers(), health, v2_router, global_router],
     lifespan=[lifespan],
     middleware=[rate_limit_config.middleware],
     cors_config=CORSConfig(

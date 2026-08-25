@@ -2,13 +2,16 @@ services:
   db:
     image: postgis/postgis:17-3.5-alpine
     platform: linux/amd64
+    # Postgres parallel aggregates (e.g. a 30-day global leaderboard over ~1.5M changesets) allocate DSM
+    # segments in /dev/shm; the 64MB Docker default overflows, so give it room.
+    shm_size: 256m
     environment:
       POSTGRES_USER: osmsg
       POSTGRES_PASSWORD: osmsg
       POSTGRES_DB: osmsg
     command: >
       postgres
-      -c shared_buffers=384MB
+      -c shared_buffers=512MB
       -c effective_cache_size=2560MB
       -c random_page_cost=1.1
       -c work_mem=32MB

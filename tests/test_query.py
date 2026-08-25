@@ -127,6 +127,67 @@ def test_cooccurring_hashtags(con, sources):
     ]
 
 
+def test_global_window_stats_and_consistency(con, sources):
+    # Whole-OSM stats over a window, no hashtag. Add two more recent changesets (bob JOSM, carol iD) so the
+    # aggregation spans several users/editors; the existing recent changeset 3 is alice (iD).
+    con.execute("INSERT INTO users VALUES (3, 'carol')")
+    con.execute(
+        "INSERT INTO cs_stats VALUES "
+        "(10, 0, 2, 3,0,0,0,0,0,0,0,0,0,0, []), "  # bob: nodes_created=3
+        "(11, 0, 3, 0,0,0,2,0,0,0,0,0,0,0, [])"  # carol: ways_created=2
+    )
+    con.execute("INSERT INTO csets VALUES (10, 2, 'JOSM', '2026-07-06', ['#foo']), (11, 3, 'iD', '2026-07-07', [])")
+    start, end = dt.datetime(2026, 7, 1, tzinfo=dt.UTC), dt.datetime(2026, 8, 1, tzinfo=dt.UTC)
+
+    summ = query.global_summary(con, sources, start=start, end=end)
+    assert summ["users"] == 3 and summ["changesets"] == 3
+    assert summ["map_changes"] == 10  # alice 5 + bob 3 + carol 2
+
+    lb = query.global_leaderboard(con, sources, start=start, end=end)
+    assert lb["total"] == 3  # consistency: leaderboard total equals summary users
+    assert [(r["name"], r["map_changes"], r["rank"]) for r in lb["items"]] == [
+        ("alice", 5, 1),
+        ("bob", 3, 2),
+        ("carol", 2, 3),
+    ]
+
+    eds = {e["editor"]: e for e in query.global_editors(con, sources, start=start, end=end)}
+    assert eds["iD"]["changesets"] == 2 and eds["iD"]["users"] == 2  # alice + carol
+    assert eds["JOSM"]["changesets"] == 1 and eds["JOSM"]["users"] == 1
+
+    tr = {t["hashtag"]: t for t in query.global_trending(con, sources, start=start, end=end)}
+    assert set(tr) == {"#hotosm-project-2", "#waterproject", "#foo"}
+    assert tr["#foo"]["users"] == 1
+
+    # Per-user attaches on the leaderboard rows, full parity with the hashtag leaderboard.
+    alice = next(r for r in lb["items"] if r["name"] == "alice")
+    assert alice["tag_stats"]["building"]["yes"] == {"c": 1, "m": 2}
+    assert alice["editors"] == ["iD"]
+    assert set(alice["hashtags"]) == {"#hotosm-project-2", "#waterproject"}
+    bob = next(r for r in lb["items"] if r["name"] == "bob")
+    assert bob["tag_stats"] == {} and bob["editors"] == ["JOSM"] and bob["hashtags"] == ["#foo"]
+
+
+def test_global_leaderboard_gates_heavy_page_tag_stats(con, sources, monkeypatch):
+    # Over-threshold page skips per-user tags; editors/hashtags still attach.
+    start, end = dt.datetime(2026, 7, 1, tzinfo=dt.UTC), dt.datetime(2026, 8, 1, tzinfo=dt.UTC)
+    monkeypatch.setattr(query, "_MAX_GLOBAL_TAG_MAP_CHANGES", 0)
+    lb = query.global_leaderboard(con, sources, start=start, end=end)
+    assert lb["total"] >= 1
+    assert all(r["tag_stats"] == {} for r in lb["items"])  # gated off
+    alice = next(r for r in lb["items"] if r["name"] == "alice")
+    assert alice["editors"] == ["iD"] and set(alice["hashtags"]) == {"#hotosm-project-2", "#waterproject"}
+
+    # Aggregate global tag breakdown (the detailed tag stats panel).
+    gt = query.global_tags(con, sources, start=start, end=end)
+    assert len(gt) == 1 and gt[0]["tag_key"] == "building" and gt[0]["tag_value"] == "yes"
+    assert gt[0]["creates"] == 1 and gt[0]["modifies"] == 2
+
+    # A window before the data returns nothing (no rows, zero users).
+    empty = query.global_summary(con, sources, start=dt.datetime(2020, 1, 1, tzinfo=dt.UTC), end=start)
+    assert empty["users"] == 0 and empty["changesets"] == 0
+
+
 def test_all_time_warm_fills_caches_and_is_idempotent(con, sources, tmp_path):
     s = dataclasses.replace(sources, cache_dir=str(tmp_path))
     assert query.all_time_warm_pending(s, "hotosm") is True

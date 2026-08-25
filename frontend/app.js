@@ -460,7 +460,10 @@ const BUSY_RETRIES = 1;
 const BUSY_BACKOFF_MS = 2500;
 
 function endpoint(name, params) {
-  const base = `/api/v2/hashtag/${encodeURIComponent(state.hashtags.join(","))}/${name}`;
+  // No hashtags -> whole-OSM (global) endpoints; the co-occurring "hashtags" section maps to global trending.
+  const base = state.hashtags.length
+    ? `/api/v2/hashtag/${encodeURIComponent(state.hashtags.join(","))}/${name}`
+    : `/api/v2/global/${name === "hashtags" ? "trending" : name}`;
   const u = new URL(base, API_BASE);
   params.forEach((v, k) => u.searchParams.set(k, v));
   return u;
@@ -505,7 +508,7 @@ function freezeWindow() {
 function windowParams() {
   if (!state.windowStart || !state.windowEnd) freezeWindow();
   const p = new URLSearchParams();
-  // All-time omits the window: an explicit full range bypasses the API's all-time cache and warm.
+  // All-time omits the window: an explicit full range bypasses the API's all-time cache.
   if (state.range !== "all") {
     p.set("start", isoUTC(state.windowStart));
     p.set("end", isoUTC(state.windowEnd));
@@ -568,11 +571,17 @@ async function runQuery() {
   writeURL();
   renderWindowBar();
   fetchHealth();
-  if (!state.hashtags.length) {
-    showEmptyPrompt();
-    return;
+  const global = !state.hashtags.length;
+  if (global) {
+    // Whole-OSM stats are Postgres-only and limited to the last 7 days; wider or all-time is not supported.
+    const spanMs = state.windowEnd - state.windowStart;
+    if (state.range === "all" || spanMs > 7 * 86400 * 1000 + 60000) {
+      showGlobalPrompt();
+      return;
+    }
+  } else {
+    saveRecentSearch();
   }
-  saveRecentSearch();
   state.query?.abort?.();
   const ctrl = new AbortController();
   state.query = ctrl;
@@ -668,7 +677,6 @@ function sliceBatchToRows() {
 // the UI then pages 10/20/50 WITHIN a batch client-side. Only crossing a batch boundary, or a new
 // sort/search (`forceFetch`), hits the API. `setPodium` seeds the top-3 from the first batch.
 async function loadLeaderboardPage(setPodium = false, forceFetch = false) {
-  if (!state.hashtags.length) return;
   const startRow = (state.page - 1) * state.pageSize;
   const batchIndex = Math.floor(startRow / state.batchSize);
   // Serve from the loaded batch when possible.
@@ -932,7 +940,17 @@ function showEmptyPrompt() {
   $("#podium")?.closest("section")?.style.setProperty("display", "none");
   $("#ov-details").hidden = true;
   $("#podium").innerHTML = "";
-  $("#lb-body").innerHTML = `<tr><td colspan="8"><div class="empty"><i data-lucide="arrow-down-to-line"></i><h3>Extract a hashtag</h3><p>Type one or more hashtags above and press Extract.</p></div></td></tr>`;
+  $("#lb-body").innerHTML = `<tr><td colspan="8"><div class="empty"><i data-lucide="arrow-down-to-line"></i><h3>Extract a hashtag</h3><p>Type one or more hashtags above and press Extract, or leave it empty for whole-OSM stats (last 30 days).</p></div></td></tr>`;
+  $("#pagination").hidden = true;
+  refreshIcons();
+}
+
+function showGlobalPrompt() {
+  $("#overview")?.closest("section")?.style.setProperty("display", "none");
+  $("#podium")?.closest("section")?.style.setProperty("display", "none");
+  $("#ov-details").hidden = true;
+  $("#podium").innerHTML = "";
+  $("#lb-body").innerHTML = `<tr><td colspan="8"><div class="empty"><i data-lucide="globe"></i><h3>Whole-OSM stats</h3><p>Global stats (no hashtag) cover the last 7 days. Choose 1h, 24h, or 7d, then Extract.</p></div></td></tr>`;
   $("#pagination").hidden = true;
   refreshIcons();
 }
@@ -1569,7 +1587,7 @@ function renderEditorStats() {
 }
 
 async function fetchEditorStats() {
-  if (!state.hashtags.length) { state.editorStats = null; renderEditorStats(); return; }
+  if (!state.query) { state.editorStats = null; renderEditorStats(); return; }
   try {
     const editors = await apiGet("editors", windowParams(), state.query?.signal);
     const all = (editors || [])

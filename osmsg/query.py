@@ -828,3 +828,224 @@ def map_points(
     )
     res = con.execute(f"{sql} LIMIT ?", [*params, limit])
     return _rows(res)
+
+
+# Whole-OSM (no-hashtag) stats over a recent window from Postgres, capped at GLOBAL_MAX_DAYS since the
+# aggregate scans every changeset in the window.
+GLOBAL_MAX_DAYS = 7
+
+_PC_SUMS = ", ".join(f"SUM(s.{c}) AS {c}" for c in COUNT_COLS)
+
+# Above this per-page map_changes sum, skip the per-user tag unnest (its cost tracks map_changes).
+_MAX_GLOBAL_TAG_MAP_CHANGES = 500_000
+
+
+def _global_users_rel(s: Sources, start, end) -> tuple[str, list[object]]:
+    if s.pg_attach:
+        return catalog.global_user_agg(s.pg_attach, start=start, end=end), []
+    return (
+        f"(SELECT s.uid AS uid, count(DISTINCT s.changeset_id) AS changesets, {_PC_SUMS} "
+        f"FROM {s.recent_stats_rel} s JOIN {s.recent_changesets_rel} c USING (changeset_id) "
+        f"WHERE c.created_at >= ? AND c.created_at < ? GROUP BY s.uid)"
+    ), [start, end]
+
+
+def _attach_global_user_tags(con, rows: list[dict[str, Any]], s: Sources, start, end) -> None:
+    for r in rows:
+        r["tag_stats"] = {}
+    if not rows:
+        return
+    uids = [r["uid"] for r in rows]
+    if s.pg_attach:
+        rrel = catalog.global_user_tags(s.pg_attach, uids, start=start, end=end)
+        tag_rows = con.execute(f"SELECT uid, k, v, c, m, l FROM {rrel}").fetchall()
+    else:
+        ph = ", ".join("?" for _ in uids)
+        tag_rows = con.execute(
+            "SELECT uid, t.k AS k, t.v AS v, SUM(t.c) AS c, SUM(t.m) AS m, SUM(t.l) AS l "
+            f"FROM (SELECT s.uid AS uid, UNNEST(s.tags) AS t FROM {s.recent_stats_rel} s "
+            f"JOIN {s.recent_changesets_rel} c USING (changeset_id) "
+            f"WHERE c.created_at >= ? AND c.created_at < ? AND s.uid IN ({ph})) GROUP BY uid, t.k, t.v",
+            [start, end, *uids],
+        ).fetchall()
+    per_uid: dict[Any, list[dict[str, Any]]] = {}
+    for uid, k, v, c, m, length_m in tag_rows:
+        per_uid.setdefault(uid, []).append({"k": k, "v": v, "c": c, "m": m, "l": length_m})
+    for r in rows:
+        if per_uid.get(r["uid"]):
+            r["tag_stats"] = _tags_to_nested(per_uid[r["uid"]])
+
+
+def _attach_global_user_editors(con, rows: list[dict[str, Any]], s: Sources, start, end) -> None:
+    for r in rows:
+        r["editors"] = []
+    if not rows:
+        return
+    uids = [r["uid"] for r in rows]
+    if s.pg_attach:
+        recent, params = (
+            f"SELECT uid, editor FROM {catalog.global_user_editors(s.pg_attach, uids, start=start, end=end)}",
+            [],
+        )
+    else:
+        ph = ", ".join("?" for _ in uids)
+        recent = (
+            f"SELECT DISTINCT s.uid AS uid, c.editor AS editor FROM {s.recent_stats_rel} s "
+            f"JOIN {s.recent_changesets_rel} c USING (changeset_id) "
+            f"WHERE c.created_at >= ? AND c.created_at < ? AND s.uid IN ({ph})"
+        )
+        params = [start, end, *uids]
+    result = con.execute(
+        f"SELECT uid, list(DISTINCT editor) AS editors FROM ({recent}) GROUP BY uid", params
+    ).fetchall()
+    by_uid = {uid: list(editors or []) for uid, editors in result}
+    for r in rows:
+        r["editors"] = by_uid.get(r["uid"], [])
+
+
+def _attach_global_user_hashtags(con, rows: list[dict[str, Any]], s: Sources, start, end) -> None:
+    for r in rows:
+        r["hashtags"] = []
+    if not rows:
+        return
+    uids = [r["uid"] for r in rows]
+    if s.pg_attach:
+        recent, params = (
+            f"SELECT uid, hashtag FROM {catalog.global_user_hashtags(s.pg_attach, uids, start=start, end=end)}",
+            [],
+        )
+    else:
+        ph = ", ".join("?" for _ in uids)
+        recent = (
+            f"SELECT DISTINCT uid, lower(h) AS hashtag FROM (SELECT s.uid AS uid, UNNEST(c.hashtags) AS h "
+            f"FROM {s.recent_stats_rel} s JOIN {s.recent_changesets_rel} c USING (changeset_id) "
+            f"WHERE c.created_at >= ? AND c.created_at < ? AND s.uid IN ({ph}))"
+        )
+        params = [start, end, *uids]
+    result = con.execute(
+        f"SELECT uid, list(DISTINCT hashtag) AS hashtags FROM ({recent}) GROUP BY uid", params
+    ).fetchall()
+    by_uid = {uid: list(hashtags or []) for uid, hashtags in result}
+    for r in rows:
+        r["hashtags"] = by_uid.get(r["uid"], [])
+
+
+def global_tags(con: duckdb.DuckDBPyConnection, s: Sources, *, start, end, limit: int = 100) -> list[dict[str, Any]]:
+    if s.pg_attach:
+        rrel = catalog.global_tag_agg(s.pg_attach, start=start, end=end)
+        res = con.execute(
+            f"SELECT k AS tag_key, v AS tag_value, creates, modifies, length_m "
+            f"FROM {rrel} ORDER BY creates DESC LIMIT ?",
+            [limit],
+        )
+    else:
+        res = con.execute(
+            "SELECT k AS tag_key, v AS tag_value, SUM(c) AS creates, SUM(m) AS modifies, SUM(l) AS length_m "
+            f"FROM (SELECT t.k AS k, t.v AS v, t.c AS c, t.m AS m, t.l AS l FROM (SELECT UNNEST(s.tags) AS t "
+            f"FROM {s.recent_stats_rel} s JOIN {s.recent_changesets_rel} c USING (changeset_id) "
+            f"WHERE c.created_at >= ? AND c.created_at < ?)) GROUP BY k, v ORDER BY creates DESC LIMIT ?",
+            [start, end, limit],
+        )
+    return _rows(res)
+
+
+def global_summary(con: duckdb.DuckDBPyConnection, s: Sources, *, start, end) -> dict[str, Any]:
+    rel, params = _global_users_rel(s, start, end)
+    res = con.execute(
+        f"SELECT count(*) AS users, COALESCE(SUM(changesets), 0) AS changesets, {sum_cols()}, {map_changes_sum()} "
+        f"FROM {rel}",
+        params,
+    )
+    return _rows(res)[0]
+
+
+def global_leaderboard(
+    con: duckdb.DuckDBPyConnection,
+    s: Sources,
+    *,
+    start,
+    end,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    sort: str = "map_changes",
+    order: str = "desc",
+    q: str | None = None,
+) -> dict[str, Any]:
+    if sort not in LEADERBOARD_SORTS:
+        raise ValueError(f"sort must be one of {tuple(LEADERBOARD_SORTS)}")
+    if order not in ("asc", "desc"):
+        raise ValueError("order must be 'asc' or 'desc'")
+    page = max(1, page)
+    page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+    rel, params = _global_users_rel(s, start, end)
+    search_pred, search_params = "", []
+    if q:
+        search_pred = " WHERE lower(name) LIKE ? ESCAPE '\\'"
+        search_params = [f"%{_like_escape(q.strip().lower())}%"]
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE _g_lb AS
+        SELECT c.uid, COALESCE(u.username, 'user ' || c.uid) AS name, c.changesets, {_COLS},
+               {map_changes_expr("c")} AS map_changes
+        FROM {rel} c LEFT JOIN {s.users_rel} u USING (uid){search_pred}
+        """,
+        [*params, *search_params],
+    )
+    total_row = con.execute("SELECT count(*) FROM _g_lb").fetchone()
+    total = total_row[0] if total_row else 0
+    offset = (page - 1) * page_size
+    order_by = f"{LEADERBOARD_SORTS[sort]} {order.upper()} NULLS LAST, uid ASC"
+    rows = _rows(con.execute(f"SELECT * FROM _g_lb ORDER BY {order_by} LIMIT ? OFFSET ?", [page_size, offset]))
+    for i, r in enumerate(rows):
+        r["rank"] = offset + i + 1
+    # Skip the per-user tag unnest for heavy pages (cost tracks map_changes); /tags still covers the aggregate.
+    if sum(r.get("map_changes") or 0 for r in rows) <= _MAX_GLOBAL_TAG_MAP_CHANGES:
+        _attach_global_user_tags(con, rows, s, start, end)
+    else:
+        for r in rows:
+            r["tag_stats"] = {}
+    _attach_global_user_editors(con, rows, s, start, end)
+    _attach_global_user_hashtags(con, rows, s, start, end)
+    return {
+        "items": rows,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": (total + page_size - 1) // page_size,
+    }
+
+
+def global_editors(con: duckdb.DuckDBPyConnection, s: Sources, *, start, end) -> list[dict[str, Any]]:
+    if s.pg_attach:
+        rel = catalog.global_editor_agg(s.pg_attach, start=start, end=end)
+        eu_sel, params = f"SELECT editor, uid, cs, map_changes FROM {rel}", []
+    else:
+        eu_sel = (
+            f"SELECT COALESCE(NULLIF(c.editor, ''), 'unknown') AS editor, s.uid AS uid, "
+            f"count(DISTINCT s.changeset_id) AS cs, sum({map_changes_expr('s')}) AS map_changes "
+            f"FROM {s.recent_stats_rel} s JOIN {s.recent_changesets_rel} c USING (changeset_id) "
+            f"WHERE c.created_at >= ? AND c.created_at < ? GROUP BY 1, s.uid"
+        )
+        params = [start, end]
+    res = con.execute(
+        f"SELECT editor, SUM(cs) AS changesets, count(*) AS users, SUM(map_changes) AS map_changes "
+        f"FROM ({eu_sel}) GROUP BY editor ORDER BY map_changes DESC",
+        params,
+    )
+    return _rows(res)
+
+
+def global_trending(con: duckdb.DuckDBPyConnection, s: Sources, *, start, end, limit: int = 15) -> list[dict[str, Any]]:
+    if s.pg_attach:
+        rel = catalog.global_trending(s.pg_attach, start=start, end=end)
+        res = con.execute(
+            f"SELECT hashtag, changesets, users FROM {rel} ORDER BY users DESC, hashtag ASC LIMIT ?", [limit]
+        )
+    else:
+        res = con.execute(
+            "SELECT hashtag, count(DISTINCT changeset_id) AS changesets, count(DISTINCT uid) AS users FROM ("
+            f"SELECT c.changeset_id, c.uid, lower(UNNEST(c.hashtags)) AS hashtag FROM {s.recent_changesets_rel} c "
+            "WHERE c.created_at >= ? AND c.created_at < ?) GROUP BY hashtag ORDER BY users DESC, hashtag ASC LIMIT ?",
+            [start, end, limit],
+        )
+    return _rows(res)

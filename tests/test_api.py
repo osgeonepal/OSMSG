@@ -53,6 +53,32 @@ def test_v2_window_validation():
         _window(b, a)  # inverted range is a client error
 
 
+def test_global_window_resolution():
+    from datetime import UTC, datetime, timedelta
+
+    from litestar.exceptions import HTTPException
+
+    from api.routers.global_stats import _resolve
+
+    now = datetime.now(UTC)
+    # window shortcut resolves to [now - window, now]
+    s, e = _resolve("24h", None, None)
+    assert timedelta(hours=23, minutes=59) < e - s < timedelta(hours=24, minutes=1)
+    # explicit recent bounded window is accepted
+    a, b = now - timedelta(days=7), now
+    assert _resolve(None, a, b) == (a, b)
+    # rejected: unknown window, all-time (no bounds), inverted, too-wide, too-old
+    for bad in [
+        lambda: _resolve("decade", None, None),
+        lambda: _resolve(None, None, None),
+        lambda: _resolve(None, b, a),
+        lambda: _resolve(None, now - timedelta(days=45), now),
+        lambda: _resolve(None, now - timedelta(days=200), now - timedelta(days=180)),
+    ]:
+        with pytest.raises(HTTPException):
+            bad()
+
+
 def test_frontend_dist_serves_spa(tmp_path, monkeypatch):
     """With FRONTEND_DIST set, the app serves the built frontend at / and its assets, and an API route
     still wins over the static catch-all."""
