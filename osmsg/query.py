@@ -832,7 +832,7 @@ def map_points(
 
 # Whole-OSM (no-hashtag) stats over a recent window from Postgres, capped at GLOBAL_MAX_DAYS since the
 # aggregate scans every changeset in the window.
-GLOBAL_MAX_DAYS = 7
+GLOBAL_MAX_DAYS = int(os.getenv("OSMSG_GLOBAL_MAX_DAYS", "7"))
 
 _PC_SUMS = ", ".join(f"SUM(s.{c}) AS {c}" for c in COUNT_COLS)
 

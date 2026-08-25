@@ -2,20 +2,21 @@ services:
   db:
     image: postgis/postgis:17-3.5-alpine
     platform: linux/amd64
-    # Postgres parallel aggregates (e.g. a 30-day global leaderboard over ~1.5M changesets) allocate DSM
-    # segments in /dev/shm; the 64MB Docker default overflows, so give it room.
-    shm_size: 256m
+    # Parallel aggregates allocate DSM segments in /dev/shm; the 64MB Docker default overflows.
+    shm_size: 512m
     environment:
       POSTGRES_USER: osmsg
       POSTGRES_PASSWORD: osmsg
       POSTGRES_DB: osmsg
     command: >
       postgres
-      -c shared_buffers=512MB
-      -c effective_cache_size=2560MB
+      -c shared_buffers=2GB
+      -c effective_cache_size=5GB
       -c random_page_cost=1.1
-      -c work_mem=32MB
-      -c maintenance_work_mem=192MB
+      -c work_mem=64MB
+      -c maintenance_work_mem=512MB
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=4
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,10 +27,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 1536M
+          cpus: "3.0"
+          memory: 4096M
         reservations:
-          memory: 512M
+          memory: 1024M
     restart: unless-stopped
 
   api:
@@ -37,16 +38,18 @@ services:
     environment:
       DATABASE_URL: postgresql://osmsg:osmsg@db:5432/osmsg
       OSMSG_QUERY_CACHE_DIR: ${OSMSG_QUERY_CACHE_DIR:-}
+      OSMSG_PG_WORK_MEM: ${OSMSG_PG_WORK_MEM:-96MB}
+      OSMSG_GLOBAL_MAX_DAYS: ${OSMSG_GLOBAL_MAX_DAYS:-7}
     depends_on:
       db:
         condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: "0.30"
-          memory: 512M
+          cpus: "2.0"
+          memory: 2048M
         reservations:
-          memory: 128M
+          memory: 256M
     restart: unless-stopped
 
   worker:
@@ -75,7 +78,7 @@ services:
       resources:
         limits:
           cpus: "1.50"
-          memory: 1536M
+          memory: 1024M
         reservations:
           memory: 256M
     restart: unless-stopped

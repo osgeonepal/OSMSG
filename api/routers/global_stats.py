@@ -11,12 +11,17 @@ from osmsg.query import LEADERBOARD_SORTS as _LEADERBOARD_SORTS
 
 from .. import duck
 
-_WINDOWS = {
-    "1h": timedelta(hours=1),
-    "24h": timedelta(hours=24),
-    "7d": timedelta(days=7),
-}
 _MAX = timedelta(days=GLOBAL_MAX_DAYS)
+_WINDOWS = {
+    k: v
+    for k, v in {
+        "1h": timedelta(hours=1),
+        "24h": timedelta(hours=24),
+        "7d": timedelta(days=7),
+        "30d": timedelta(days=30),
+    }.items()
+    if v <= _MAX
+}
 
 
 def _resolve(window: str | None, start: datetime | None, end: datetime | None) -> tuple[datetime, datetime]:
@@ -26,7 +31,7 @@ def _resolve(window: str | None, start: datetime | None, end: datetime | None) -
         now = datetime.now(UTC)
         return now - _WINDOWS[window], now
     if start is None or end is None:
-        raise HTTPException(status_code=400, detail="provide window (1h|24h|7d) or both start and end")
+        raise HTTPException(status_code=400, detail=f"provide window ({'|'.join(_WINDOWS)}) or both start and end")
     if start >= end:
         raise HTTPException(status_code=400, detail="start must be before end")
     if end - start > _MAX:
