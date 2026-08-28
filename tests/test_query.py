@@ -261,6 +261,20 @@ def test_exact_hashtag_no_prefix_bleed(con, sources):
     assert query.summary(con, "missingmaps", sources)["changesets"] == 0
 
 
+def test_exact_match_excludes_longer_hashtags(con, sources):
+    """A longer hashtag sharing the search as a prefix (#hotosm-project-11 vs #hotosm-project-1) is counted
+    under prefix search but excluded under exact search."""
+    zeros = ", ".join(["0"] * len(COUNT_COLS))
+    con.execute(
+        f"INSERT INTO history VALUES ('#hotosm-project-11', 10, 3, 'iD', '2026-05-03', "
+        f"{zeros.replace('0', '4', 1)}, [])"
+    )
+    prefix = query.summary(con, "hotosm-project-1", sources)
+    assert prefix["changesets"] == 3  # #hotosm-project-1 (cs 1, 2) + #hotosm-project-11 (cs 10)
+    exact = query.summary(con, "hotosm-project-1", sources, exact=True)
+    assert exact["changesets"] == 2  # only the two #hotosm-project-1 changesets
+
+
 def test_cache_hit_equals_miss(con, sources, tmp_path):
     """The all-time cache is pure memoization: miss (computes + writes) and hit (reads) both equal the
     uncached result. This is the guarantee that caching never changes the numbers."""

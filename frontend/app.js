@@ -18,6 +18,7 @@ const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 const state = {
   hashtags: [],
+  exact: false,
   range: "24h",
   customStart: null,
   customEnd: null,
@@ -346,6 +347,10 @@ hashtagInput.addEventListener("keydown", (e) => {
     apply();
   }
 });
+$("#exact-match").addEventListener("change", (e) => {
+  state.exact = e.target.checked;
+  apply();
+});
 const customRangePanel = $("#custom-range"),
   crRangeInput = $("#cr-range"),
   crChipText = $("#cr-chip-text"),
@@ -513,6 +518,8 @@ function windowParams() {
     p.set("start", isoUTC(state.windowStart));
     p.set("end", isoUTC(state.windowEnd));
   }
+  // Exact match applies only to hashtag endpoints; the global (no-hashtag) ones don't accept it.
+  if (state.exact && state.hashtags.length) p.set("exact", "true");
   return p;
 }
 
@@ -573,9 +580,9 @@ async function runQuery() {
   fetchHealth();
   const global = !state.hashtags.length;
   if (global) {
-    // Whole-OSM stats are Postgres-only and limited to the last 7 days; wider or all-time is not supported.
+    // Whole-OSM stats are Postgres-only and limited to the last 30 days; wider or all-time is not supported.
     const spanMs = state.windowEnd - state.windowStart;
-    if (state.range === "all" || spanMs > 7 * 86400 * 1000 + 60000) {
+    if (state.range === "all" || spanMs > 30 * 86400 * 1000 + 60000) {
       showGlobalPrompt();
       return;
     }
@@ -950,7 +957,7 @@ function showGlobalPrompt() {
   $("#podium")?.closest("section")?.style.setProperty("display", "none");
   $("#ov-details").hidden = true;
   $("#podium").innerHTML = "";
-  $("#lb-body").innerHTML = `<tr><td colspan="8"><div class="empty"><i data-lucide="globe"></i><h3>Whole-OSM stats</h3><p>Global stats (no hashtag) cover the last 7 days. Choose 1h, 24h, or 7d, then Extract.</p></div></td></tr>`;
+  $("#lb-body").innerHTML = `<tr><td colspan="8"><div class="empty"><i data-lucide="globe"></i><h3>Whole-OSM stats</h3><p>Global stats (no hashtag) cover the last 30 days. Choose 1h, 24h, 7d, or 30d, then Extract.</p></div></td></tr>`;
   $("#pagination").hidden = true;
   refreshIcons();
 }
@@ -1640,6 +1647,9 @@ function readURL() {
   const tags = p.getAll("hashtag").concat(p.getAll("hashtags"));
   if (tags.length)
     state.hashtags = [...new Set(tags.map((t) => t.replace(/^#/, "").toLowerCase()))];
+  state.exact = p.get("exact") === "true";
+  const exactBox = $("#exact-match");
+  if (exactBox) exactBox.checked = state.exact;
   const ps = parseInt(p.get("size") || "", 10);
   if ([10, 20, 50].includes(ps)) {
     state.pageSize = ps;
@@ -1654,6 +1664,7 @@ function writeURL() {
     p.set("end", isoUTC(state.customEnd));
   }
   state.hashtags.forEach((h) => p.append("hashtag", h));
+  if (state.exact) p.set("exact", "true");
   if (state.pageSize !== 10) p.set("size", String(state.pageSize));
   history.replaceState(null, "", `${location.pathname}?${p}`);
 }

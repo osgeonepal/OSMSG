@@ -36,15 +36,16 @@ class HashtagController(Controller):
 
     @get("/summary")
     async def get_summary(
-        self, hashtag: str, start: datetime | None = None, end: datetime | None = None
+        self, hashtag: str, exact: bool = False, start: datetime | None = None, end: datetime | None = None
     ) -> dict[str, Any]:
         start, end = _window(start, end)
-        return await duck.summary(_hashtags(hashtag), start=start, end=end)
+        return await duck.summary(_hashtags(hashtag), exact=exact, start=start, end=end)
 
     @get("/leaderboard")
     async def get_leaderboard(
         self,
         hashtag: str,
+        exact: bool = False,
         page: int = 1,
         page_size: int = 25,
         sort: str = "map_changes",
@@ -64,51 +65,75 @@ class HashtagController(Controller):
             raise HTTPException(status_code=400, detail="page must be >= 1")
         start, end = _window(start, end)
         return await duck.leaderboard(
-            _hashtags(hashtag), page=page, page_size=page_size, sort=sort, order=order, q=q, start=start, end=end
+            _hashtags(hashtag),
+            exact=exact,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            order=order,
+            q=q,
+            start=start,
+            end=end,
         )
 
     @get("/tags")
     async def get_tags(
-        self, hashtag: str, limit: int = 100, start: datetime | None = None, end: datetime | None = None
+        self,
+        hashtag: str,
+        exact: bool = False,
+        limit: int = 100,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> list[dict[str, Any]]:
         start, end = _window(start, end)
-        return await duck.tags(_hashtags(hashtag), limit=limit, start=start, end=end)
+        return await duck.tags(_hashtags(hashtag), exact=exact, limit=limit, start=start, end=end)
 
     @get("/editors")
     async def get_editors(
-        self, hashtag: str, start: datetime | None = None, end: datetime | None = None
+        self, hashtag: str, exact: bool = False, start: datetime | None = None, end: datetime | None = None
     ) -> list[dict[str, Any]]:
         start, end = _window(start, end)
-        return await duck.editors(_hashtags(hashtag), start=start, end=end)
+        return await duck.editors(_hashtags(hashtag), exact=exact, start=start, end=end)
 
     @get("/hashtags")
     async def get_hashtags(
-        self, hashtag: str, limit: int = 15, start: datetime | None = None, end: datetime | None = None
+        self,
+        hashtag: str,
+        exact: bool = False,
+        limit: int = 15,
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """Trending hashtags in the queried scope, ranked by distinct contributors: `[{hashtag, users}]`."""
         start, end = _window(start, end)
-        return await duck.hashtags(_hashtags(hashtag), limit=limit, start=start, end=end)
+        return await duck.hashtags(_hashtags(hashtag), exact=exact, limit=limit, start=start, end=end)
 
     @get("/trends")
     async def get_trends(
-        self, hashtag: str, interval: str = "day", start: datetime | None = None, end: datetime | None = None
+        self,
+        hashtag: str,
+        exact: bool = False,
+        interval: str = "day",
+        start: datetime | None = None,
+        end: datetime | None = None,
     ) -> list[dict[str, Any]]:
         if interval not in _TREND_INTERVALS:
             raise HTTPException(status_code=400, detail=f"interval must be one of {', '.join(_TREND_INTERVALS)}")
         start, end = _window(start, end)
-        return await duck.trends(_hashtags(hashtag), interval=interval, start=start, end=end)
+        return await duck.trends(_hashtags(hashtag), exact=exact, interval=interval, start=start, end=end)
 
     @get("/map")
     async def get_map(
         self,
         hashtag: str,
+        exact: bool = False,
         limit: int = 2000,
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> dict[str, Any]:
         """A GeoJSON FeatureCollection of changeset centroids (Point), for clustering and heatmaps."""
         start, end = _window(start, end)
-        points = await duck.map_points(_hashtags(hashtag), limit=limit, start=start, end=end)
+        points = await duck.map_points(_hashtags(hashtag), exact=exact, limit=limit, start=start, end=end)
         return {
             "type": "FeatureCollection",
             "features": [

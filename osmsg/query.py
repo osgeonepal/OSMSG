@@ -55,9 +55,16 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _prefixes(hashtag: str | list[str]) -> list[tuple[str, str]]:
-    """Normalize one hashtag or many into deduped `(lo, hi)` prefix-range pairs, case-insensitive and
-    order-preserving. Each hashtag matches as a prefix; the scope is the union across them."""
+# Exact-match upper bound. Hashtags are #[\w-]+, so the smallest continuation byte on any longer hashtag is
+# '-' (0x2D); a bound below it makes [lo, lo + _EXACT_SENTINEL) match lo alone, excluding #hotosm-project-11
+# when searching #hotosm-project-1. A space works on both DuckDB and Postgres (COLLATE "C"), unlike a null byte.
+_EXACT_SENTINEL = " "
+
+
+def _prefixes(hashtag: str | list[str], *, exact: bool = False) -> list[tuple[str, str]]:
+    """Normalize one hashtag or many into deduped `(lo, hi)` range pairs, case-insensitive and
+    order-preserving. Each hashtag matches as a prefix, or only itself when `exact`; the scope is the
+    union across them."""
     tags = [hashtag] if isinstance(hashtag, str) else list(hashtag)
     seen: set[str] = set()
     pairs: list[tuple[str, str]] = []
@@ -66,7 +73,7 @@ def _prefixes(hashtag: str | list[str]) -> list[tuple[str, str]]:
         if lo == "#" or lo in seen:
             continue
         seen.add(lo)
-        pairs.append((lo, prefix_upper_bound(lo)))
+        pairs.append((lo, lo + _EXACT_SENTINEL if exact else prefix_upper_bound(lo)))
     if not pairs:
         raise ValueError("at least one non-empty hashtag is required")
     return pairs
@@ -164,10 +171,10 @@ def _warm_trending_cooccur(con, prefixes: list[tuple[str, str]], s: Sources) -> 
     _materialize_history(con, "_warm_cooccur", sql, [*prefix_params, s.frontier, s.frontier], path)
 
 
-def warm_all_time(con, hashtag: str | list[str], s: Sources) -> None:
+def warm_all_time(con, hashtag: str | list[str], s: Sources, *, exact: bool = False) -> None:
     """Fill the all-time history caches (leaderboard per-user tags, trending co-occurring) for a hashtag off
     the request path. Idempotent: each cache is written once per frontier and skipped once present."""
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     # A warm writes unordered cache files, so drop order preservation to keep these large aggregates spilling
     # to disk under the memory cap instead of holding the whole result in memory.
     con.execute("SET preserve_insertion_order=false")
@@ -175,10 +182,10 @@ def warm_all_time(con, hashtag: str | list[str], s: Sources) -> None:
     _warm_trending_cooccur(con, prefixes, s)
 
 
-def all_time_warm_pending(s: Sources, hashtag: str | list[str]) -> bool:
+def all_time_warm_pending(s: Sources, hashtag: str | list[str], *, exact: bool = False) -> bool:
     """True when the all-time warm is worth firing, keyed on the co-occurring cache that every warm writes
     last. False when caching is off or the warm has already run."""
-    path = _cache_path(s, _prefixes(hashtag), "cooccur", None, None)
+    path = _cache_path(s, _prefixes(hashtag, exact=exact), "cooccur", None, None)
     return path is not None and not path.exists()
 
 
@@ -258,13 +265,14 @@ def summary(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Totals for the hashtag: distinct users, changesets, the full element breakdown. Optional [start,
     end) window. Aggregates each side per user, then combines (disjoint by frontier -> additive counts;
     distinct users is the count of combined per-user rows)."""
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     hsql, hp = _history(s, prefixes, start, end)
     rrel, rp = _recent_users(s, prefixes, start, end)
@@ -512,6 +520,7 @@ def leaderboard(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
     sort: str = "map_changes",
@@ -529,7 +538,7 @@ def leaderboard(
         raise ValueError("order must be 'asc' or 'desc'")
     page = max(1, page)
     page_size = max(1, min(page_size, MAX_PAGE_SIZE))
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     hsql, hp = _history(s, prefixes, start, end)
     count_sql, count_params = catalog.history_scope_count(
@@ -603,13 +612,14 @@ def tags(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     limit: int = 100,
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Tag key/value breakdown (creates/modifies/length) over the hashtag's deduped changesets. Optional
     [start, end) window."""
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     per_tag = (
         "SELECT t.k AS k, t.v AS v, SUM(t.c) AS creates, SUM(t.m) AS modifies, SUM(t.l) AS length_m "
@@ -642,13 +652,14 @@ def editors(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Editor breakdown for the hashtag: changesets, distinct users, and map_changes per editor. Optional
     [start, end) window. Aggregated per (editor, uid) on each side so distinct users are exact across the
     frontier."""
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     hsql, hp = _history(s, prefixes, start, end)
     per_eu = (
@@ -683,6 +694,7 @@ def hashtags(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     limit: int = 15,
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
@@ -690,7 +702,7 @@ def hashtags(
     """Hashtags carried by the changesets that match the search (co-occurring), ranked by distinct
     contributors then total edits: `[{hashtag, users, edits}]`. Reveals which other hashtags and
     projects were used alongside the searched hashtag. Optional [start, end) window."""
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     window_sql, window_params = catalog._window_clause(start, end)
     prefix_params = [bound for pair in prefixes for bound in pair]
@@ -752,6 +764,7 @@ def trends(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     interval: str = "day",
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
@@ -761,7 +774,7 @@ def trends(
     aggregates combine additively."""
     if interval not in TREND_INTERVALS:
         raise ValueError(f"interval must be one of {TREND_INTERVALS}")
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     hsql, hp = _history(s, prefixes, start, end)
     bucket = f"CAST(date_trunc('{interval}', created_at) AS DATE)::VARCHAR"
@@ -797,6 +810,7 @@ def map_points(
     hashtag: str | list[str],
     s: Sources,
     *,
+    exact: bool = False,
     limit: int = 2000,
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
@@ -804,7 +818,7 @@ def map_points(
     """Changeset centroids `(changeset_id, uid, lon, lat)` for the hashtag union, up to `limit`, for a
     map. Optional [start, end) window. Recent centroids come from the base changesets bbox; history
     centroids come from the rollup only when it carries `lon`/`lat` (older published rollups do not)."""
-    prefixes = _prefixes(hashtag)
+    prefixes = _prefixes(hashtag, exact=exact)
     if s.pg_attach:
         rrel = catalog.recent_map_agg(s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
         recent_sel = f"SELECT changeset_id, uid, lon, lat FROM {rrel}"

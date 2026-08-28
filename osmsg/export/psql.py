@@ -4,6 +4,7 @@ import duckdb
 
 from ..exceptions import OsmsgError
 from ..pg_schema import PG_SCHEMA, PG_TAG_TYPE_SQL
+from ..ui import warn
 
 _BULK_INDEXES = [
     ("idx_changesets_created_at", "CREATE INDEX idx_changesets_created_at ON changesets USING BTREE (created_at)"),
@@ -261,6 +262,17 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
             _pg(conn, "ANALYZE changesets")
             _pg(conn, "ANALYZE changeset_stats")
             _pg(conn, "ANALYZE changeset_hashtag")
+
+        # Metadata the store held but that stayed NULL in PG after the push means the push lost it (stub gap).
+        row = conn.execute(
+            "SELECT count(*) FROM changesets sc WHERE sc.created_at IS NOT NULL AND EXISTS "
+            "(SELECT 1 FROM pg_target.changesets pc WHERE pc.changeset_id = sc.changeset_id "
+            "AND pc.created_at IS NULL)"
+        ).fetchone()
+        if row and row[0]:
+            warn(
+                f"changeset metadata drop: {row[0]} changesets had metadata in the store but are NULL in PG after push"
+            )
     finally:
         conn.execute("DETACH pg_target")
 

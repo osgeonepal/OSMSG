@@ -72,6 +72,15 @@
           <div id="chips" class="chips" aria-live="polite"></div>
           <input id="hashtag-input" type="text" placeholder="hotosm, osmnepal, osgeonepal " />
         </div>
+        <label class="exact-toggle" for="exact-match">
+          <input type="checkbox" id="exact-match" />
+          <span>Exact match</span>
+          <span class="info-tip" tabindex="0" role="img"
+            aria-label="Exact match returns only the hashtag you typed, not longer hashtags that start with it."
+            data-tip="On: #hotosm-project-1 matches only itself. Off: also matches #hotosm-project-11, -12, …">
+            <i data-lucide="info" class="ico-sm"></i>
+          </span>
+        </label>
       </div>
       <div class="field">
         <label><i data-lucide="calendar-range" class="ico-sm"></i> Time range</label>

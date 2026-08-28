@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily osmsg stub-changeset backfill
+
+[Timer]
+OnCalendar=*-*-* 05:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

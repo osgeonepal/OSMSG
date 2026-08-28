@@ -89,6 +89,19 @@ def prune_pg_cmd(
     prune_covered(psql_dsn, history_url, overlap=dt.timedelta(days=overlap_days))
 
 
+@maintain_app.command("check")
+def check_cmd(
+    psql_dsn: Annotated[str, typer.Option("--psql-dsn", help="Postgres DSN of the deployment to check.")],
+    fix: Annotated[
+        bool, typer.Option("--fix", help="Repair stubs by fetching their metadata from the OSM API.")
+    ] = False,
+) -> None:
+    """Find 'stub' changesets (edits captured but metadata missing); with --fix, backfill closed ones."""
+    from .check import check_stubs
+
+    check_stubs(psql_dsn, fix=fix)
+
+
 @maintain_app.command("refresh")
 def refresh_cmd(
     artifact_dir: Annotated[Path, typer.Option("--artifact-dir", help="Local history artifact the API reads.")],

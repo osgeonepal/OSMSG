@@ -33,6 +33,9 @@ def test_query_prefixes_normalization():
     # single string and list both work; # optional; case-insensitive dedupe; order preserved
     assert _prefixes("hotosm") == [("#hotosm", "#hotosn")]
     assert _prefixes(["#HotOSM", "hotosm", "osmnepal"]) == [("#hotosm", "#hotosn"), ("#osmnepal", "#osmnepam")]
+    # exact match: the upper bound is the tag plus a byte below any hashtag continuation char, so the range
+    # holds only the tag itself (#hotosm-project-1, not #hotosm-project-11).
+    assert _prefixes("#hotosm-project-1", exact=True) == [("#hotosm-project-1", "#hotosm-project-1 ")]
     with pytest.raises(ValueError, match="at least one"):
         _prefixes(["", "  "])
 

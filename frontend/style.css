@@ -571,6 +571,28 @@ a:hover {
     box-shadow: 0 0 0 3px rgba(45, 95, 63, 0.12);
 }
 
+.exact-toggle {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    color: var(--muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.exact-toggle input {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--green);
+    cursor: pointer;
+    margin: 0;
+}
+
+.exact-toggle .info-tip {
+    display: inline-flex;
+}
+
 .field-input input {
     flex: 1 1 100px;
     min-width: 100px;

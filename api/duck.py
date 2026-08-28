@@ -126,7 +126,7 @@ def _acquire(pool: queue.Queue) -> duckdb.DuckDBPyConnection:
 # A timed-out all-time query caches nothing, so its retry is just as slow; on timeout we re-run it in the
 # background to fill the cache the retry reads. One at a time on its own connection so it can't starve the pool.
 _warm_pool = ThreadPoolExecutor(max_workers=1)
-_warm_inflight: set[tuple[str, str]] = set()
+_warm_inflight: set[tuple[str, str, bool]] = set()
 _warm_lock = threading.Lock()
 
 
@@ -147,7 +147,7 @@ def _enqueue_warm(fn, hashtag, kwargs) -> None:
     No-op when caching is off."""
     if _QUERY_CACHE_DIR is None:
         return
-    key = (fn.__name__, repr(hashtag))
+    key = (fn.__name__, repr(hashtag), bool(kwargs.get("exact", False)))
     with _warm_lock:
         if key in _warm_inflight:
             return
@@ -155,10 +155,10 @@ def _enqueue_warm(fn, hashtag, kwargs) -> None:
     _warm_pool.submit(_warm, fn, hashtag, kwargs, key)
 
 
-def _warm_all_time_job(hashtag, key) -> None:
+def _warm_all_time_job(hashtag, key, exact) -> None:
     con = _connect()
     try:
-        query.warm_all_time(con, hashtag, _sources())
+        query.warm_all_time(con, hashtag, _sources(), exact=exact)
     except duckdb.Error as e:
         _log.warning("all-time warm for %r failed: %s", hashtag, e)
     finally:
@@ -167,17 +167,17 @@ def _warm_all_time_job(hashtag, key) -> None:
             _warm_inflight.discard(key)
 
 
-def _maybe_warm_all_time(hashtag) -> None:
+def _maybe_warm_all_time(hashtag, exact) -> None:
     """Fire a background warm of the all-time history caches (leaderboard per-user tags, trending
     co-occurring) for this hashtag when any is still cold, deduped per hashtag. No-op when caching is off."""
-    if _QUERY_CACHE_DIR is None or not query.all_time_warm_pending(_sources(), hashtag):
+    if _QUERY_CACHE_DIR is None or not query.all_time_warm_pending(_sources(), hashtag, exact=exact):
         return
-    key = ("warm_all_time", repr(hashtag))
+    key = ("warm_all_time", repr(hashtag), bool(exact))
     with _warm_lock:
         if key in _warm_inflight:
             return
         _warm_inflight.add(key)
-    _warm_pool.submit(_warm_all_time_job, hashtag, key)
+    _warm_pool.submit(_warm_all_time_job, hashtag, key, exact)
 
 
 def _run(fn, hashtag, **kwargs):
@@ -219,13 +219,20 @@ def _run(fn, hashtag, **kwargs):
             pool.put(_connect())
 
 
-async def summary(hashtag: str | list[str], *, start: dt.datetime | None = None, end: dt.datetime | None = None):
-    return await asyncio.to_thread(_run, query.summary, hashtag, start=start, end=end)
+async def summary(
+    hashtag: str | list[str],
+    *,
+    exact: bool = False,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+):
+    return await asyncio.to_thread(_run, query.summary, hashtag, exact=exact, start=start, end=end)
 
 
 async def leaderboard(
     hashtag: str | list[str],
     *,
+    exact: bool = False,
     page: int = 1,
     page_size: int = query.DEFAULT_PAGE_SIZE,
     sort: str = "map_changes",
@@ -238,6 +245,7 @@ async def leaderboard(
         _run,
         query.leaderboard,
         hashtag,
+        exact=exact,
         page=page,
         page_size=page_size,
         sort=sort,
@@ -247,43 +255,65 @@ async def leaderboard(
         end=end,
     )
     if start is None and end is None:
-        _maybe_warm_all_time(hashtag)
+        _maybe_warm_all_time(hashtag, exact)
     return res
 
 
 async def tags(
-    hashtag: str | list[str], *, limit: int = 100, start: dt.datetime | None = None, end: dt.datetime | None = None
+    hashtag: str | list[str],
+    *,
+    exact: bool = False,
+    limit: int = 100,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
 ):
-    return await asyncio.to_thread(_run, query.tags, hashtag, limit=limit, start=start, end=end)
+    return await asyncio.to_thread(_run, query.tags, hashtag, exact=exact, limit=limit, start=start, end=end)
 
 
-async def editors(hashtag: str | list[str], *, start: dt.datetime | None = None, end: dt.datetime | None = None):
-    return await asyncio.to_thread(_run, query.editors, hashtag, start=start, end=end)
+async def editors(
+    hashtag: str | list[str],
+    *,
+    exact: bool = False,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
+):
+    return await asyncio.to_thread(_run, query.editors, hashtag, exact=exact, start=start, end=end)
 
 
 async def hashtags(
-    hashtag: str | list[str], *, limit: int = 15, start: dt.datetime | None = None, end: dt.datetime | None = None
+    hashtag: str | list[str],
+    *,
+    exact: bool = False,
+    limit: int = 15,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
 ):
-    res = await asyncio.to_thread(_run, query.hashtags, hashtag, limit=limit, start=start, end=end)
+    res = await asyncio.to_thread(_run, query.hashtags, hashtag, exact=exact, limit=limit, start=start, end=end)
     if start is None and end is None:
-        _maybe_warm_all_time(hashtag)
+        _maybe_warm_all_time(hashtag, exact)
     return res
 
 
 async def trends(
     hashtag: str | list[str],
     *,
+    exact: bool = False,
     interval: str = "day",
     start: dt.datetime | None = None,
     end: dt.datetime | None = None,
 ):
-    return await asyncio.to_thread(_run, query.trends, hashtag, interval=interval, start=start, end=end)
+    return await asyncio.to_thread(_run, query.trends, hashtag, exact=exact, interval=interval, start=start, end=end)
 
 
 async def map_points(
-    hashtag: str | list[str], *, limit: int = 2000, start: dt.datetime | None = None, end: dt.datetime | None = None
+    hashtag: str | list[str],
+    *,
+    exact: bool = False,
+    limit: int = 2000,
+    start: dt.datetime | None = None,
+    end: dt.datetime | None = None,
 ):
-    return await asyncio.to_thread(_run, query.map_points, hashtag, limit=limit, start=start, end=end)
+    return await asyncio.to_thread(_run, query.map_points, hashtag, exact=exact, limit=limit, start=start, end=end)
 
 
 def _run_global(fn, **kwargs):
