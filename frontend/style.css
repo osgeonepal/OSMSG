@@ -551,12 +551,19 @@ a:hover {
     display: flex;
     align-items: center;
     gap: 6px;
+    white-space: nowrap;
 }
 
 .field-head {
     display: flex;
     align-items: center;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    min-width: 0;
+}
+
+.field-head>label:not(.exact-toggle) {
+    flex: 0 0 auto;
 }
 
 .field-input {
@@ -582,6 +589,7 @@ a:hover {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 0 0 auto;
     margin-left: auto;
     font-size: 11px;
     text-transform: uppercase;
@@ -590,6 +598,7 @@ a:hover {
     color: var(--muted);
     cursor: pointer;
     user-select: none;
+    white-space: nowrap;
 }
 
 .exact-toggle input {
