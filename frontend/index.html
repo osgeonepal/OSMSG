@@ -60,27 +60,29 @@
   <section class="hero">
     <form id="query-form" class="search-card" autocomplete="off">
       <div class="field">
-        <label for="hashtag-input"><i data-lucide="hash" class="ico-sm"></i> Hashtags
-          <span class="info-tip" tabindex="0" role="img"
-            aria-label="Press Enter to add a hashtag. Leave empty for global stats. Multiple hashtags are OR-combined."
-            data-tip="Type a hashtag and press Enter to add it. Add several to combine them. Then hit Extract.">
-            <i data-lucide="info" class="ico-sm"></i>
-          </span>
-        </label>
+        <div class="field-head">
+          <label for="hashtag-input"><i data-lucide="hash" class="ico-sm"></i> Hashtags
+            <span class="info-tip" tabindex="0" role="img"
+              aria-label="Press Enter to add a hashtag. Leave empty for global stats. Multiple hashtags are OR-combined."
+              data-tip="Type a hashtag and press Enter to add it. Add several to combine them. Then hit Extract.">
+              <i data-lucide="info" class="ico-sm"></i>
+            </span>
+          </label>
+          <label class="exact-toggle" for="exact-match">
+            <input type="checkbox" id="exact-match" />
+            <span>Exact</span>
+            <span class="info-tip" tabindex="0" role="img"
+              aria-label="Exact match returns only the hashtag you typed, not longer hashtags that start with it."
+              data-tip="On: #hotosm-project-1 matches only itself. Off: also matches #hotosm-project-11, -12, …">
+              <i data-lucide="info" class="ico-sm"></i>
+            </span>
+          </label>
+        </div>
         <div class="field-input" id="hashtag-field">
           <i data-lucide="hash" class="ico-md"></i>
           <div id="chips" class="chips" aria-live="polite"></div>
           <input id="hashtag-input" type="text" placeholder="hotosm, osmnepal, osgeonepal " />
         </div>
-        <label class="exact-toggle" for="exact-match">
-          <input type="checkbox" id="exact-match" />
-          <span>Exact match</span>
-          <span class="info-tip" tabindex="0" role="img"
-            aria-label="Exact match returns only the hashtag you typed, not longer hashtags that start with it."
-            data-tip="On: #hotosm-project-1 matches only itself. Off: also matches #hotosm-project-11, -12, …">
-            <i data-lucide="info" class="ico-sm"></i>
-          </span>
-        </label>
       </div>
       <div class="field">
         <label><i data-lucide="calendar-range" class="ico-sm"></i> Time range</label>
