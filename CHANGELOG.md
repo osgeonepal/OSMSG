@@ -1,3 +1,63 @@
+## v1.3.2 (2026-08-30)
+
+### Fix
+
+- **fix**: add the exact mapping type in the tabe
+- **filename**: exact naming
+- **style**: fix style of exact checkbox
+- **exact**: add exact button
+- **match**: add exact match only search in hashtag
+- **stats**: bump global stat retention days
+- **live-search**: add global endpoint for trending
+- **todo**: remove todo from html
+- **sponsor**: fix sponsorship page
+- **osmsg/handlers.py**: track --length keys independently of --tags
+- **contact**: add contact and sponsor page in the website
+- **index**: add missing index in schema
+- **tag**: user
+- **psql**: tune for index
+- **query**: perusertag
+- **toggle**: dark and bright toggle in the dashboard
+- **tag-breakdown**: cache on stages
+- **query**: cache enable in frontend leaderboard
+- **frtonend**: pass
+- **poll**: fix the api poll queue on large query
+- **changeset**: long standing changeset fix
+- **chore**: cleanup
+- **stat**: add coalescence in query
+- **osmsg/history.py**: single remote changesets lookup and fix unfiltered users insert
+- **prune**: add pg prune
+- **hf**: fix download request to hf download
+- **resume**: download resume on refresh
+- **cleanup**: selfheal on hf rollup updates
+- **ci**: add ci fix for keeping repo alive
+- **addpost**: postprune image systemd service
+- **reduce**: mem footprint of duckdb
+- **chore**: fix the threads and preserve order for container
+- **chore**: fix rollup maintain rollup
+- **rollup**: add rollup to github actions and added adaptive workers to month.py
+- **mem**: fix roll up to allow runing on small devices
+- **query**: merge hashtag case variants in co-occurrence
+- **query**: escape LIKE wildcards in contributor search
+- **ratelimit**: add api ratelimit
+- **chore**: remove hr from footer
+- **frontend**: move frontend to main repo
+- **fix**: fixes the changeset not null stats bug
+- **query**: add osm query cache in env
+- **cache**: add recurring hashtag defer recouring for all time
+- **tick**: self heal duckdb range
+- **psql-tick**: add nonchunk push to postgresql
+- **related-hashtags**: add more hashtags fix trending
+- **cap**: add cap env to docker compose
+- **cli**: add tick on the pipeline
+- **convert**: set max size for the convert
+- **precommit**: fix test cases
+- **fix**: convert parquet history length km
+- **bug**: fix bug on update tick after tag unnesting
+- **query**: fix api query performance , migrate cte
+- **chore**: housekeping
+- **stats**: fix stas py being git ignored
+
 ## v1.3.1 (2026-07-25)
 
 ### Fix
