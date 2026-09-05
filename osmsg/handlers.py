@@ -1,7 +1,5 @@
 """osmium SimpleHandler subclasses driving the in-memory accumulators."""
 
-from __future__ import annotations
-
 import datetime as dt
 import re
 from typing import Any

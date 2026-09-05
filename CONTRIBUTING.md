@@ -64,7 +64,7 @@ git push --follow-tags
 `cz bump` updates the version in `pyproject.toml` and `osmsg/__version__.py`, refreshes `CHANGELOG.md`, and tags
 the release. Pushing the tag (or publishing a GitHub Release) triggers:
 
-- PyPI publish via [publish.yml](./.github/workflows/publish.yml) using the `PYPI_API_TOKEN` repo secret.
+- PyPI publish via [release.yml](./.github/workflows/release.yml) using the `PYPI_API_TOKEN` repo secret.
 - Multi-arch Docker image build to `ghcr.io/osgeonepal/osmsg` via [docker.yml](./.github/workflows/docker.yml).
 
 ## Reporting issues

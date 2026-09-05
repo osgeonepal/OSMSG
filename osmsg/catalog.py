@@ -3,8 +3,6 @@
 or attached Postgres, hashtag-filtered first), unioned and split at the frontier. The query runs in DuckDB.
 """
 
-from __future__ import annotations
-
 import datetime as dt
 
 from .stats import COUNT_COLS, MAP_CHANGES_COLS
@@ -341,45 +339,6 @@ def _recent_from_base(stats_rel: str, changesets_rel: str, window_sql: str, pref
         SELECT m.changeset_id, m.uid, m.editor, m.created_at, {payload}, COALESCE(t.tags, []) AS tags
         FROM matched m JOIN per_cs p USING (changeset_id) LEFT JOIN tags t USING (changeset_id)
     """
-
-
-def hashtag_scope(
-    history_rel: str,
-    recent_stats_rel: str,
-    recent_changesets_rel: str,
-    *,
-    prefixes: list[tuple[str, str]],
-    frontier: dt.datetime,
-    start: dt.datetime | None = None,
-    end: dt.datetime | None = None,
-) -> tuple[str, list[object]]:
-    """One deduped per-changeset relation for hashtag prefix ranges [lo, hi): the rollup for history
-    (< frontier) unioned with the recent tail (>= frontier), deduped by changeset_id, optional [start,
-    end) window. Returns (sql, params)."""
-    if not prefixes:
-        raise ValueError("prefixes must be non-empty")
-    window_sql, window_params = _window_clause(start, end)
-    prefix_params = [bound for pair in prefixes for bound in pair]
-    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
-    recent_pred = " OR ".join("(lower(h) >= ? AND lower(h) < ?)" for _ in prefixes)
-    recent = _recent_from_base(recent_stats_rel, recent_changesets_rel, window_sql, recent_pred)
-    sql = f"""
-        SELECT DISTINCT ON (changeset_id) {_PROJECTION} FROM (
-            SELECT {_PROJECTION} FROM {history_rel}
-                WHERE ({hist_pred}) AND created_at < ?{window_sql}
-            UNION ALL
-            ({recent})
-        )
-    """
-    params: list[object] = [
-        *prefix_params,
-        frontier,
-        *window_params,
-        frontier,
-        *window_params,
-        *prefix_params,
-    ]
-    return sql, params
 
 
 def history_dedup_scope(

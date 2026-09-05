@@ -17,12 +17,10 @@ Library usage::
         result = run(cfg)
     except OsmsgError as exc:
         ...
-    print(result["files"]["parquet"])      # → 'nepal.parquet'
+    print(result["files"]["parquet"])      # -> 'nepal.parquet'
 
 CLI entry point: ``osmsg`` (defined in ``osmsg.cli``).
 """
-
-from __future__ import annotations
 
 from .__version__ import __version__
 from .db import (

@@ -1,3 +1,5 @@
+# Local development stack (builds images from the checkout, no Caddy/frontend). For a production
+# self-hosted deployment use infra/docker-compose.yml; see docs/infra.md.
 services:
   db:
     image: postgis/postgis:17-3.5-alpine
@@ -46,7 +48,7 @@ services:
       OSMSG_BOOTSTRAP_DAYS: ${OSMSG_BOOTSTRAP_DAYS:-}
       OSM_USERNAME: ${OSM_USERNAME:-}
       OSM_PASSWORD: ${OSM_PASSWORD:-}
-      OSMSG_EXTRA_ARGS: ${OSMSG_EXTRA_ARGS:---name stats --output-dir /var/lib/osmsg --cache-dir /var/cache/osmsg --url minute --format psql --psql-dsn postgresql://osmsg:osmsg@db:5432/osmsg}
+      OSMSG_EXTRA_ARGS: ${OSMSG_EXTRA_ARGS:---name stats --output-dir /var/lib/osmsg --cache-dir /var/cache/osmsg --format psql --psql-dsn postgresql://osmsg:osmsg@db:5432/osmsg}
     volumes:
       - osmsg-data:/var/lib/osmsg
       - osmsg-cache:/var/cache/osmsg

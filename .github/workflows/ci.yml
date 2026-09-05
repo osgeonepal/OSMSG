@@ -55,6 +55,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - run: uv build --no-sources
+      - name: Verify wheel is complete and importable
+        run: bash scripts/verify_wheel.sh
 
   smoke:
     name: Smoke (last hour)

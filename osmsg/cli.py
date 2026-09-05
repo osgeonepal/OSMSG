@@ -2,8 +2,6 @@
 polars/pandas), other formats csv, json, markdown, psql.
 """
 
-from __future__ import annotations
-
 import datetime as dt
 from enum import StrEnum
 from pathlib import Path

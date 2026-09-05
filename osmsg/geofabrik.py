@@ -1,7 +1,5 @@
 """Live region lookup via Geofabrik index-v1.json."""
 
-from __future__ import annotations
-
 from functools import lru_cache
 from typing import Any
 

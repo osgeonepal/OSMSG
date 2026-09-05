@@ -1,8 +1,6 @@
 """Download + decompress OSM replication files. Cache-friendly: skips downloads
 when the decompressed file is already on disk."""
 
-from __future__ import annotations
-
 import gzip
 import os
 import shutil

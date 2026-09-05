@@ -1,7 +1,5 @@
 """OSM replication URL helpers, planet changefiles + planet changesets."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 
 from osmium.replication.server import ReplicationServer
@@ -19,7 +17,7 @@ CHANGESETS_REPLICATION = f"{PLANET_BASE}/changesets/"
 
 
 def resolve_url(value: str) -> str:
-    """`minute|hour|day` → planet URL, else passthrough (after stripping trailing /)."""
+    """`minute|hour|day` -> planet URL, else passthrough (after stripping trailing /)."""
     if value in SHORTCUTS:
         return SHORTCUTS[value]
     return value.rstrip("/")

@@ -1,7 +1,5 @@
 """Per-worker parquet writers + bulk merge into DuckDB."""
 
-from __future__ import annotations
-
 import math
 import shutil
 import sys

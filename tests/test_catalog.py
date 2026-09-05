@@ -10,7 +10,6 @@ import duckdb
 import pytest
 
 from osmsg import catalog
-from osmsg.catalog import hashtag_scope
 from osmsg.stats import COUNT_COLS, map_changes_sum, prefix_upper_bound
 
 _FRONTIER = dt.datetime(2026, 7, 1, tzinfo=dt.UTC)
@@ -59,6 +58,14 @@ def _make(con):
     )
 
 
+def _combined(history_rel, recent_stats_rel, recent_changesets_rel, **kw):
+    """The full frontier-split relation (history < frontier unioned with recent >= frontier), built the way
+    the query layer combines the two disjoint sides."""
+    hist_sql, hist_params = catalog.history_dedup_scope(history_rel, **kw)
+    recent_sql, recent_params = catalog.recent_scope(recent_stats_rel, recent_changesets_rel, **kw)
+    return f"{hist_sql} UNION ALL {recent_sql}", [*hist_params, *recent_params]
+
+
 def _summary(con, sql, params):
     r = con.execute(f"WITH m AS ({sql}) SELECT count(DISTINCT uid) u, count(*) n, {map_changes_sum()} FROM m", params)
     return r.fetchone()
@@ -75,7 +82,7 @@ def test_combine_split_equals_whole():
         [lo, hi],
     ).fetchone()
     # History from the rollup (< frontier), recent from the base tables (>= frontier): reproduces the whole.
-    sql, params = hashtag_scope("hc", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
+    sql, params = _combined("hc", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
     combined = _summary(con, sql, params)
     assert combined == whole
     assert whole[1] == 3  # three #hotosm changesets, #missingmaps excluded
@@ -87,7 +94,7 @@ def test_recent_side_only_counts_after_frontier():
     lo, hi = "#hotosm", prefix_upper_bound("#hotosm")
     # Empty history -> only the two #hotosm changesets on/after the frontier (2 and 3) remain.
     con.execute("CREATE TABLE empty_hist AS SELECT * FROM hc LIMIT 0")
-    sql, params = hashtag_scope("empty_hist", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
+    sql, params = _combined("empty_hist", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
     combined = _summary(con, sql, params)
     assert combined[1] == 2  # changesets 2 and 3 (2026-07-05, 2026-07-20)
 
@@ -98,7 +105,7 @@ def test_window_bounds_both_sides_of_frontier():
     lo, hi = "#hotosm", prefix_upper_bound("#hotosm")
 
     def window(start, end):
-        sql, params = hashtag_scope(
+        sql, params = _combined(
             "hc", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER, start=start, end=end
         )
         return _summary(con, sql, params)[1]  # changeset count
@@ -119,11 +126,11 @@ def test_multi_prefix_union_and_dedup():
     h = prefix_upper_bound
     # union of two disjoint prefixes: all four changesets (1,2,3 #hotosm + 4 #missingmaps).
     disjoint = [("#hotosm", h("#hotosm")), ("#missingmaps", h("#missingmaps"))]
-    sql, params = hashtag_scope("hc", "cs_stats", "csets", prefixes=disjoint, frontier=_FRONTIER)
+    sql, params = _combined("hc", "cs_stats", "csets", prefixes=disjoint, frontier=_FRONTIER)
     assert _summary(con, sql, params)[1] == 4
     # overlapping prefixes must not double-count: #hotosm already covers #hotosm-project.
     overlap = [("#hotosm", h("#hotosm")), ("#hotosm-project", h("#hotosm-project"))]
-    sql, params = hashtag_scope("hc", "cs_stats", "csets", prefixes=overlap, frontier=_FRONTIER)
+    sql, params = _combined("hc", "cs_stats", "csets", prefixes=overlap, frontier=_FRONTIER)
     assert _summary(con, sql, params)[1] == 3  # the three #hotosm changesets, none doubled
 
 
@@ -166,7 +173,7 @@ def test_history_side_ignores_recent_rollup_rows():
     lo, hi = "#hotosm", prefix_upper_bound("#hotosm")
     # The rollup also holds changesets 2 and 3 (>= frontier); the history side must exclude them so the
     # recent base side owns them (no double-count). Only changeset 1 comes from history here.
-    sql, params = hashtag_scope("hc", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
+    sql, params = _combined("hc", "cs_stats", "csets", prefixes=[(lo, hi)], frontier=_FRONTIER)
     ids = con.execute(f"WITH m AS ({sql}) SELECT changeset_id FROM m ORDER BY changeset_id", params).fetchall()
     assert [r[0] for r in ids] == [1, 2, 3]
 

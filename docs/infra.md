@@ -49,6 +49,11 @@ sudo cp infra/osmsg.service /etc/systemd/system/ && sudo systemctl daemon-reload
 sudo systemctl enable --now osmsg
 ```
 
+Set `GA_MEASUREMENT_ID` in `infra/.env` to enable Google Analytics on the frontend; leave it empty to
+serve the site without analytics. The `/mnt/mnt` bind paths in `infra/docker-compose.yml` match the
+reference deployment's block volume; on a single-disk host, create those directories (above) or replace
+the binds with plain named volumes.
+
 Deploy updates with `git -C /opt/osmsg pull` (refreshes both the frontend and the compose files);
 `infra/.env` and any `infra/docker-compose.override.yml` are gitignored and stay untouched.
 

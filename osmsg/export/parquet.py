@@ -1,7 +1,5 @@
 """Export rows as a single Parquet file (queryable via DuckDB / polars / pandas)."""
 
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any

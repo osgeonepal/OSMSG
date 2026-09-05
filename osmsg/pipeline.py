@@ -1,6 +1,4 @@
-"""End-to-end orchestration: download → process → ingest → query → export."""
-
-from __future__ import annotations
+"""End-to-end orchestration: download -> process -> ingest -> query -> export."""
 
 import concurrent.futures
 import copy

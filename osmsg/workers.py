@@ -1,7 +1,5 @@
 """ProcessPoolExecutor entry points for changeset + changefile parsing."""
 
-from __future__ import annotations
-
 import os
 import sys
 from contextlib import suppress

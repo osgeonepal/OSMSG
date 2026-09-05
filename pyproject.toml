@@ -17,6 +17,7 @@ dependencies = [
     "pyarrow>=24.0.0",
     "pydantic>=2.13.3",
     "python-dotenv>=1.2.2",
+    # Required at runtime by duckdb's Python bindings for timezone-aware timestamp handling; not imported directly.
     "pytz>=2024.1",
     "requests>=2.32.5",
     "rich>=13.0",

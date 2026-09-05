@@ -3,8 +3,6 @@
 Mirrors https://github.com/geofabrik/sendfile_osm_oauth_protector
 """
 
-from __future__ import annotations
-
 import urllib.parse
 from html.parser import HTMLParser
 

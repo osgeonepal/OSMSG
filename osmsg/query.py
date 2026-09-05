@@ -2,8 +2,6 @@
 + stats vocabulary so the CLI and API compute identically. History and recent are disjoint at the
 frontier, so each function aggregates them separately and combines, keeping large hashtags fast."""
 
-from __future__ import annotations
-
 import dataclasses
 import datetime as dt
 import hashlib

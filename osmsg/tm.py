@@ -1,7 +1,5 @@
 """Tasking Manager API integration (HOT TM4)."""
 
-from __future__ import annotations
-
 import concurrent.futures
 import re
 from collections import defaultdict

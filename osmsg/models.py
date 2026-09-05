@@ -1,8 +1,6 @@
 """Pydantic models for the pipeline. In-handler stats use ergonomic helpers, then flatten to plain
 columns (`to_row()`) for a schema portable across DuckDB, Parquet, and Postgres."""
 
-from __future__ import annotations
-
 from datetime import datetime
 from enum import StrEnum
 from typing import Any

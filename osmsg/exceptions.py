@@ -2,8 +2,6 @@
 catch them where they integrate the pipeline.
 """
 
-from __future__ import annotations
-
 
 class OsmsgError(Exception):
     """Base for every error osmsg raises at API boundaries."""

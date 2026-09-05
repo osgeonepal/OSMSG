@@ -38,12 +38,8 @@ docker run --rm -v "$PWD:/work" -w /work ghcr.io/osgeonepal/osmsg:latest --last 
 `uvx` can run osmsg in a throwaway environment , no install, no virtualenv to manage. Works
 with any flag combination, e.g. `uvx --from osmsg osmsg --last hour --tags building --summary -f parquet -f markdown`.
 
-More ways to install:
-
-```bash
-conda install -c conda-forge osmsg                 # conda / mamba
-brew install osgeonepal/tap/osmsg          # macOS / Linux (Homebrew tap)
-```
+Planned install channels (not yet published): conda-forge (`conda install -c conda-forge osmsg`) and a
+Homebrew tap (`brew install osgeonepal/tap/osmsg`).
 
 On Windows, download `osmsg.exe` from the [latest release](https://github.com/osgeonepal/osmsg/releases)
 and double-click it to open the desktop app. Pick a Quick range (last hour, day, week, month, year, or
@@ -137,11 +133,15 @@ Same schema in DuckDB and Postgres: `users`, `changesets`, `changeset_stats`, `s
 
 ### 5. Run the API
 
-Push stats into Postgres, then start the Litestar API:
+Push stats into Postgres, then start the Litestar API. The API dependencies live in the `api` dependency
+group and the `api/` package runs from a repo checkout (it is not part of the published wheel), so run it
+from a clone:
 
 ```bash
-osmsg --last day --format psql --psql-dsn "postgresql://user:pass@localhost/osmsg"
-litestar --app api.app:app run --host 0.0.0.0 --port 8000
+git clone https://github.com/osgeonepal/osmsg && cd osmsg
+uv sync --group api
+uv run osmsg --last day --format psql --psql-dsn "postgresql://user:pass@localhost/osmsg"
+uv run --group api litestar --app api.app:app run --host 0.0.0.0 --port 8000
 ```
 
 ```text
@@ -209,7 +209,9 @@ docker-compose `environment:` block all reach the same setting. CLI flag wins ov
 | `--history` / `--no-history` | `OSMSG_HISTORY` | on | Read covered months from the published dataset. |
 | `--history-url` | `OSMSG_HISTORY_URL` | `osmsg-history` | Published dataset location. |
 | `--insert` | (none) | off | Load history into the store and seed resume, then exit. No window loads all of it. |
+| `--seed-only` | (none) | off | With `--insert`: seed resume state at the published frontier without loading rows. |
 | `--osh-file` / `--changeset-file` | (none) | unset | Insert from local planet history + changeset files. |
+| `--max-update-window-hours` | `OSMSG_MAX_UPDATE_WINDOW_HOURS` | unset | Cap each `--update` run to this many hours so a large backlog catches up over successive runs. |
 | `--changeset-pad-hours` | `OSMSG_CHANGESET_PAD_HOURS` | `1` | See below. |
 | (auto-bootstrap on `--update`) | `OSMSG_BOOTSTRAP` | `hour` | `hour`, `day`, or `week`. Used when `--update` runs against an empty DB. |
 | (auto-bootstrap on `--update`) | `OSMSG_BOOTSTRAP_DAYS` | unset | Integer N; overrides `OSMSG_BOOTSTRAP`. |
@@ -226,15 +228,17 @@ osmsg maintain month 2026-06 --repo osgeonepal/osmsg-history   # append one fini
 osmsg maintain month 2026-06 --no-upload                       # generate locally, review, upload later
 osmsg maintain convert history.osh.pbf changesets.osm.bz2 2005-01-01 2026-06-01 work --parts 24
 osmsg maintain publish work/out --repo osgeonepal/osmsg-history
+osmsg maintain refresh --artifact-dir /srv/osmsg/artifact    # pull the newest published month locally
+osmsg maintain prune-pg --psql-dsn "postgresql://user:pass@localhost/osmsg"   # drop rows now covered by history
+osmsg maintain check --psql-dsn "postgresql://user:pass@localhost/osmsg" --fix # backfill stub changesets
 ```
-
-See [experiments/parquet-history](./experiments/parquet-history/README.md) for the full-history batch.
 
 ## Documentation
 
 - [Installation](./docs/Installation.md)
 - [Manual](./docs/Manual.md) (every flag, with examples)
 - [Self-hosting / Docker Compose](./docs/infra.md)
+- [Roadmap](./ROADMAP.md)
 - [Version control / release notes](./docs/Version_control.md)
 
 ## Contributing

@@ -22,6 +22,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
       - run: uv build --no-sources
+      - name: Verify wheel is complete and importable
+        run: bash scripts/verify_wheel.sh
       - run: uv publish
         env:
           UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}

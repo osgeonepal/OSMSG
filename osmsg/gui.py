@@ -1,7 +1,5 @@
 """Minimal tkinter desktop UI for running osmsg and saving the output."""
 
-from __future__ import annotations
-
 import datetime as dt
 import os
 import queue

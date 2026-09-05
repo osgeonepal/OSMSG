@@ -3,8 +3,6 @@ plus the recent tail derived on the fly from the base Postgres tables, so the AP
 materialized recent rollup; the split frontier is re-read on a TTL so a newly published month needs no restart.
 """
 
-from __future__ import annotations
-
 import asyncio
 import collections
 import contextlib
