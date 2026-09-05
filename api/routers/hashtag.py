@@ -13,6 +13,7 @@ from osmsg.query import LEADERBOARD_SORTS as _LEADERBOARD_SORTS
 from osmsg.query import TREND_INTERVALS as _TREND_INTERVALS
 
 from .. import duck
+from ._common import to_utc
 
 
 def _hashtags(hashtag: str) -> list[str]:
@@ -24,8 +25,9 @@ def _hashtags(hashtag: str) -> list[str]:
 
 
 def _window(start: datetime | None, end: datetime | None) -> tuple[datetime | None, datetime | None]:
-    """Validate an optional [start, end) window. Either bound may be omitted; an inverted range is a
-    client error, not silently empty results."""
+    """Validate an optional [start, end) window, normalizing each bound to UTC. Either bound may be
+    omitted; an inverted range is a client error, not silently empty results."""
+    start, end = to_utc(start), to_utc(end)
     if start is not None and end is not None and start >= end:
         raise HTTPException(status_code=400, detail="start must be before end")
     return start, end

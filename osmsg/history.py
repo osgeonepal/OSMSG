@@ -173,11 +173,12 @@ def ingest_remote(
     if filters.hashtags:
         changeset_preds.append(_hashtag_predicate(filters.hashtags, filters.exact_lookup))
     if filters.geom_wkt:
+        wkt = filters.geom_wkt.replace("'", "''")
         changeset_preds.append(
-            f"ST_Intersects(ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat), ST_GeomFromText('{filters.geom_wkt}'))"
+            f"ST_Intersects(ST_MakeEnvelope(min_lon, min_lat, max_lon, max_lat), ST_GeomFromText('{wkt}'))"
         )
     if filters.users_filter:
-        names = ", ".join(f"'{u}'" for u in filters.users_filter)
+        names = ", ".join("'" + u.replace("'", "''") + "'" for u in filters.users_filter)
         changeset_preds.append(f"username IN ({names})")
     changeset_where = " AND ".join(changeset_preds)
 

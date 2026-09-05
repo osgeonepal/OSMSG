@@ -2,8 +2,10 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import asyncpg
 from litestar import Litestar, Request, get
 from litestar.config.cors import CORSConfig
+from litestar.exceptions import HTTPException
 from litestar.middleware.rate_limit import RateLimitConfig
 from litestar.openapi.config import OpenAPIConfig
 from litestar.openapi.plugins import SwaggerRenderPlugin
@@ -83,10 +85,12 @@ def _root_handlers() -> list:
 
 @get("/health")
 async def health() -> HealthResponse:
+    # A health check must reflect the database it depends on: a connection/query failure is reported as
+    # unavailable (503) rather than a false "ok". An empty state table (DB up, no rows yet) stays "ok".
     try:
         state = await fetch_state()
-    except Exception:
-        state = None
+    except (OSError, asyncpg.PostgresError) as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
     return HealthResponse(
         status="ok",
         last_seq=state["last_seq"] if state else None,

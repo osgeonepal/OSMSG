@@ -5,7 +5,10 @@ import re
 from collections import defaultdict
 from typing import Any
 
+import requests
+
 from ._http import session
+from .ui import warn
 
 TM_API = "https://tasking-manager-tm4-production-api.hotosm.org/api/v2/projects"
 PROJECT_RE = re.compile(r"#hotosm-project-(\d+)")
@@ -21,9 +24,11 @@ def extract_projects(hashtags: list[str] | str) -> list[str]:
 def _fetch_one(project_id: str) -> tuple[str, list[dict[str, Any]]]:
     try:
         r = session.get(f"{TM_API}/{project_id}/contributions/")
-    except Exception:
+    except requests.RequestException as exc:
+        warn(f"tasking-manager project {project_id} skipped: {exc}")
         return project_id, []
     if r.status_code != 200:
+        warn(f"tasking-manager project {project_id} skipped: HTTP {r.status_code}")
         return project_id, []
     return project_id, r.json().get("userContributions", []) or []
 

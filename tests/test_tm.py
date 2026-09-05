@@ -90,6 +90,25 @@ def test_fetch_user_stats_swallows_404_for_one_project(fake_tm_api):
     assert out["alice"]["tasks_mapped"] == 7  # bad project did not abort the run
 
 
+def test_fetch_one_skips_network_errors(monkeypatch):
+    import requests
+
+    def _raise(url, **_):
+        raise requests.ConnectionError("tm unreachable")
+
+    monkeypatch.setattr(tm.session, "get", _raise)
+    assert tm._fetch_one("42") == ("42", [])
+
+
+def test_fetch_one_does_not_swallow_unexpected_errors(monkeypatch):
+    def _raise(url, **_):
+        raise ValueError("a bug, not a network error")
+
+    monkeypatch.setattr(tm.session, "get", _raise)
+    with pytest.raises(ValueError):
+        tm._fetch_one("42")
+
+
 def test_enrich_attaches_zeros_when_no_project_hashtags():
     rows = [{"name": "alice", "hashtags": ["#mapathon"]}]
     out = tm.enrich(rows)

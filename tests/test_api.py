@@ -117,7 +117,13 @@ def test_api_exposes_only_active_public_routes():
     assert not any(p.startswith("/api/v1") for p in paths)  # v1 retired
 
 
-def test_health_endpoint_returns_ok():
+def test_health_ok_when_db_reachable(monkeypatch):
+    app_module = import_module("api.app")
+
+    async def fake_state():
+        return None
+
+    monkeypatch.setattr(app_module, "fetch_state", fake_state)
     with TestClient(Litestar(route_handlers=[health])) as client:
         response = client.get("/health")
 
@@ -125,8 +131,43 @@ def test_health_endpoint_returns_ok():
     data = response.json()
     assert data["status"] == "ok"
     assert data["last_seq"] is None
-    assert data["last_ts"] is None
-    assert data["updated_at"] is None
+
+
+def test_health_reports_503_when_db_unavailable(monkeypatch):
+    import asyncpg
+
+    app_module = import_module("api.app")
+
+    async def failing_state():
+        raise asyncpg.PostgresError("connection refused")
+
+    monkeypatch.setattr(app_module, "fetch_state", failing_state)
+    with TestClient(Litestar(route_handlers=[health])) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 503
+
+
+def test_window_normalizes_naive_datetime_to_utc():
+    from datetime import UTC, datetime
+
+    from api.routers.hashtag import _window
+
+    start, end = _window(datetime(2026, 7, 1), datetime(2026, 7, 2))
+    assert start == datetime(2026, 7, 1, tzinfo=UTC)
+    assert end.tzinfo is UTC
+
+
+def test_global_resolve_accepts_naive_datetime_window():
+    from datetime import UTC, datetime, timedelta
+
+    from api.routers.global_stats import _resolve
+
+    now = datetime.now(UTC)
+    start = (now - timedelta(hours=2)).replace(tzinfo=None)
+    end = now.replace(tzinfo=None)
+    resolved_start, resolved_end = _resolve(None, start, end)
+    assert resolved_start.tzinfo is UTC and resolved_end.tzinfo is UTC
 
 
 def test_get_cors_origins_reads_comma_separated_env(monkeypatch):

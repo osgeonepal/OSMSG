@@ -10,6 +10,7 @@ from osmsg.query import GLOBAL_MAX_DAYS
 from osmsg.query import LEADERBOARD_SORTS as _LEADERBOARD_SORTS
 
 from .. import duck
+from ._common import to_utc
 
 _MAX = timedelta(days=GLOBAL_MAX_DAYS)
 _WINDOWS = {
@@ -30,6 +31,7 @@ def _resolve(window: str | None, start: datetime | None, end: datetime | None) -
             raise HTTPException(status_code=400, detail=f"window must be one of {', '.join(_WINDOWS)}")
         now = datetime.now(UTC)
         return now - _WINDOWS[window], now
+    start, end = to_utc(start), to_utc(end)
     if start is None or end is None:
         raise HTTPException(status_code=400, detail=f"provide window ({'|'.join(_WINDOWS)}) or both start and end")
     if start >= end:
