@@ -88,6 +88,15 @@ def test_cold_start_bootstraps_at_day(tmp_path, monkeypatch, captured_cmd, clean
     assert cmd[-2:] == ["--days", "1"]  # default cold-start window
 
 
+def test_tick_watchdog_returns_nonzero_when_run_times_out(tmp_path, monkeypatch, clean_env):
+    def slow_call(cmd, *args, **kwargs):
+        raise _tick.subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(_tick.subprocess, "call", slow_call)
+    monkeypatch.setenv("OSMSG_EXTRA_ARGS", f"--name stats --output-dir {tmp_path}")
+    assert _tick.main() == 1
+
+
 def test_planet_continues_seeded_source(tmp_path, monkeypatch, captured_cmd, clean_env):
     """A `--insert --seed-only` seeds the store's resume source; the planet tick must --update off that
     seed, not re-bootstrap."""

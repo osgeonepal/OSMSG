@@ -177,6 +177,7 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
     conn.execute("INSTALL spatial")
     conn.execute("LOAD spatial")
     attach_postgres(conn, dsn, alias="pg_target")
+    pg_execute(conn, "SET lock_timeout = '120s'", alias="pg_target")
     try:
         # Create the tags composite type as the first PG op (a fresh write txn; a prior read would pin the
         # connection read-only). On re-push it already exists (the idempotent case); anything else is real.

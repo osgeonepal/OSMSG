@@ -29,6 +29,8 @@ def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
 
     if cs_n:
         writer = connect_postgres(dsn)
+        pg_execute(writer, "SET lock_timeout = '120s'")
+        pg_execute(writer, "SET statement_timeout = '1800s'")
         pg_execute(
             writer,
             f"DELETE FROM changeset_stats s USING changesets c WHERE s.changeset_id = c.changeset_id AND c.{older}",

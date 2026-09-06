@@ -107,6 +107,9 @@ def _rebuild_store_from_pg(db_path: Path, dsn: str) -> None:
         conn.close()
 
 
+_TICK_TIMEOUT_SECONDS = int(os.environ.get("OSMSG_TICK_TIMEOUT_SECONDS", "1200"))
+
+
 def main() -> int:
     extra_args = shlex.split(os.environ.get("OSMSG_EXTRA_ARGS", ""))
     bootstrap_days = os.environ.get("OSMSG_BOOTSTRAP_DAYS", "1")
@@ -154,7 +157,11 @@ def main() -> int:
             cmd.extend(["--days", bootstrap_days])
 
         print(f"[osmsg-tick] {' '.join(cmd)}", flush=True)
-        rc = subprocess.call(cmd)
+        try:
+            rc = subprocess.call(cmd, timeout=_TICK_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            print(f"[osmsg-tick] killed: exceeded {_TICK_TIMEOUT_SECONDS}s", flush=True)
+            rc = 1
         # With a psql push, Postgres is the permanent copy and the store is a per-tick delta buffer: clear
         # its data (keeping resume `state`) after a successful push so the next push stays small and fast.
         if rc == 0 and psql_dsn:
