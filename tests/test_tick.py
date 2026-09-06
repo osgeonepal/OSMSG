@@ -97,6 +97,20 @@ def test_tick_watchdog_returns_nonzero_when_run_times_out(tmp_path, monkeypatch,
     assert _tick.main() == 1
 
 
+def test_tick_timeout_tolerates_empty_env_var(monkeypatch):
+    """compose passes the var as an empty string when unset, so the timeout must fall back, not crash on
+    int('')."""
+    import importlib
+
+    monkeypatch.setenv("OSMSG_TICK_TIMEOUT_SECONDS", "")
+    try:
+        importlib.reload(_tick)
+        assert _tick._TICK_TIMEOUT_SECONDS == 1200
+    finally:
+        monkeypatch.delenv("OSMSG_TICK_TIMEOUT_SECONDS", raising=False)
+        importlib.reload(_tick)
+
+
 def test_planet_continues_seeded_source(tmp_path, monkeypatch, captured_cmd, clean_env):
     """A `--insert --seed-only` seeds the store's resume source; the planet tick must --update off that
     seed, not re-bootstrap."""

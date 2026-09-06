@@ -20,7 +20,7 @@ from .routers.hashtag import v2_router
 from .schemas import HealthResponse
 
 FRONTEND_DIST = os.getenv("FRONTEND_DIST")
-_MAX_STALENESS = timedelta(seconds=int(os.getenv("OSMSG_HEALTH_MAX_STALENESS_SECONDS", "1800")))
+_MAX_STALENESS = timedelta(seconds=int(os.getenv("OSMSG_HEALTH_MAX_STALENESS_SECONDS") or "1800"))
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",

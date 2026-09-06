@@ -107,7 +107,8 @@ def _rebuild_store_from_pg(db_path: Path, dsn: str) -> None:
         conn.close()
 
 
-_TICK_TIMEOUT_SECONDS = int(os.environ.get("OSMSG_TICK_TIMEOUT_SECONDS", "1200"))
+# `or` not a default arg: compose passes the var as an empty string when unset, which get(default) keeps.
+_TICK_TIMEOUT_SECONDS = int(os.environ.get("OSMSG_TICK_TIMEOUT_SECONDS") or "1200")
 
 
 def main() -> int:
