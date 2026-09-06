@@ -1,3 +1,9 @@
+## v1.3.4 (2026-09-06)
+
+### Fix
+
+- **regression**: fix reg in tick
+
 ## v1.3.3 (2026-09-06)
 
 ### Fix
