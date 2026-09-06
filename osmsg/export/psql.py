@@ -2,6 +2,7 @@
 
 import duckdb
 
+from ..db.pg import attach_postgres, pg_execute
 from ..exceptions import OsmsgError
 from ..pg_schema import PG_SCHEMA, PG_TAG_TYPE_SQL
 from ..ui import warn
@@ -71,9 +72,7 @@ _CHUNK_TARGET_ROWS = 45_000
 
 
 def _pg(conn: duckdb.DuckDBPyConnection, sql: str) -> None:
-    # A named dollar tag for the outer literal so a statement carrying its own $$ / $tag$ (the guarded
-    # CREATE TYPE) does not terminate the wrapper early.
-    conn.execute(f"CALL postgres_execute('pg_target', $osmsg_stmt${sql}$osmsg_stmt$)")
+    pg_execute(conn, sql, alias="pg_target")
 
 
 def _pg_has_history(conn: duckdb.DuckDBPyConnection) -> bool:
@@ -175,16 +174,12 @@ def to_psql(conn: duckdb.DuckDBPyConnection, dsn: str, *, bulk_load: bool = Fals
     """Push every osmsg table to the libpq DSN target. bulk_load is for the one-time full-history
     import (drops indexes and foreign keys, streams, rebuilds, commits per range); leave it off for
     incremental --update pushes. The DSN is interpolated into ATTACH, so it must be trusted."""
-    conn.execute("INSTALL postgres")
-    conn.execute("LOAD postgres")
     conn.execute("INSTALL spatial")
     conn.execute("LOAD spatial")
-    safe_dsn = dsn.replace("'", "''")
-    conn.execute(f"ATTACH '{safe_dsn}' AS pg_target (TYPE postgres)")
+    attach_postgres(conn, dsn, alias="pg_target")
     try:
-        # The changeset_stats.tags column depends on this composite type. Create it as the first PG op
-        # (a fresh write transaction; a prior read would pin the connection read-only). On re-push the
-        # type already exists, which is the expected idempotent case; anything else is a real failure.
+        # Create the tags composite type as the first PG op (a fresh write txn; a prior read would pin the
+        # connection read-only). On re-push it already exists (the idempotent case); anything else is real.
         try:
             _pg(conn, PG_TAG_TYPE_SQL)
         except duckdb.Error as exc:

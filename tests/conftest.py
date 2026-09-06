@@ -1,7 +1,5 @@
 """Shared fixtures: synthetic osmium changefiles + DuckDB test DB."""
 
-from __future__ import annotations
-
 import datetime as dt
 from pathlib import Path
 

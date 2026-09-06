@@ -51,7 +51,7 @@ class _FakeConn:
 
 def test_prune_pg_deletes_natively_via_postgres_execute(monkeypatch):
     calls = []
-    monkeypatch.setattr(prune.duckdb, "connect", lambda *a, **k: _FakeConn(calls))
+    monkeypatch.setattr(prune, "connect_postgres", lambda *a, **k: _FakeConn(calls))
     stats_n, cs_n = prune.prune_pg("dsn", dt.datetime(2026, 7, 30, tzinfo=UTC))
 
     deletes = [c for c in calls if "postgres_execute" in c and "DELETE" in c]

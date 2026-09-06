@@ -35,9 +35,8 @@ class Sources:
     # When set, all-time history aggregates are memoized to parquet files here (keyed by prefix+frontier),
     # so a mega-hashtag pays the dedup once. History is immutable below the frontier, so a hit is exact.
     cache_dir: str | None = None
-    # When set, the recent count endpoints read this counts-only per-changeset parquet (a TTL-refreshed
-    # slice of the matched tail) instead of re-scanning Postgres each request. Tag/per-user paths still
-    # use `pg_attach` (the slice carries no tags), so this coexists with an attached Postgres.
+    # When set, count endpoints read this counts-only TTL-refreshed parquet of the matched tail instead of
+    # re-scanning Postgres; tag/per-user paths still use `pg_attach` (no tags in the slice), so both coexist.
     recent_tail_rel: str | None = None
 
 
@@ -53,9 +52,8 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-# Exact-match upper bound. Hashtags are #[\w-]+, so the smallest continuation byte on any longer hashtag is
-# '-' (0x2D); a bound below it makes [lo, lo + _EXACT_SENTINEL) match lo alone, excluding #hotosm-project-11
-# when searching #hotosm-project-1. A space works on both DuckDB and Postgres (COLLATE "C"), unlike a null byte.
+# Exact-match upper bound: a space sorts below every hashtag continuation byte (hashtags are #[\w-]+, min '-'),
+# so [lo, lo + " ") matches lo alone (not #hotosm-project-11); works on DuckDB and Postgres, unlike a null byte.
 _EXACT_SENTINEL = " "
 
 
@@ -136,7 +134,7 @@ def _warm_leaderboard_tags(con, prefixes: list[tuple[str, str]], s: Sources) -> 
         return
     uid_list = ", ".join(str(int(u)) for (u,) in top)
     prefix_params = [bound for pair in prefixes for bound in pair]
-    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    hist_pred = catalog.range_pred("hashtag", prefixes)
     # Unnest-first with a per-changeset dedup so the wide tags struct never flows through a multi-million-row
     # DISTINCT ON; the uid filter is applied in the scan so only the top contributors' rows are read.
     sql = (
@@ -157,7 +155,7 @@ def _warm_trending_cooccur(con, prefixes: list[tuple[str, str]], s: Sources) -> 
     if path is None or path.exists():
         return
     prefix_params = [bound for pair in prefixes for bound in pair]
-    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    hist_pred = catalog.range_pred("hashtag", prefixes)
     matched_cs = f"SELECT DISTINCT changeset_id FROM {s.history_rel} WHERE ({hist_pred}) AND created_at < ?"
     # Pre-aggregate to one row per (hashtag, uid) so the read stays small and fast; the recent side is also
     # per (hashtag, uid), so the union re-dedups exactly (a contributor in both sides counts once).
@@ -298,14 +296,12 @@ def summary(
     return _rows(res)[0]
 
 
-# Per-user tag breakdown requires deduping and unnesting every matching changeset; above this many
-# history rows it is skipped so a mega-hashtag leaderboard stays fast (its tag_stats come back empty and
-# the aggregate tag breakdown is served by the /tags endpoint instead).
+# Above this many history rows the per-user tag breakdown is skipped so a mega-hashtag leaderboard stays
+# fast (tag_stats come back empty; the aggregate lives on /tags instead).
 _MAX_TAG_ROWS = 1_500_000
 
-# The co-occurring self-join scans every rollup row in the window (all hashtags), which only the window's
-# created_at partitions prune. Run it only when that scan is bounded; an all-time or very wide window reads
-# the whole rollup (~20s+), so skip the history side there and use the live recent tail alone.
+# The co-occurring self-join scans every rollup row in the window (only created_at partitions prune it), so
+# run it only when that scan is bounded; an all-time/very wide window skips history and uses the recent tail.
 _COOCCUR_MAX_SCAN_ROWS = 3_000_000
 
 
@@ -435,7 +431,7 @@ def _attach_user_hashtags(
         ph = ", ".join("?" for _ in uids)
         window_sql, window_params = catalog._window_clause(start, end)
         prefix_params = [bound for pair in prefixes for bound in pair]
-        recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
+        recent_pred = catalog.range_pred("lower(x)", prefixes)
         recent = (
             f"SELECT uid, lower(h) AS hashtag FROM (SELECT uid, UNNEST(hashtags) AS h "
             f"FROM {s.recent_changesets_rel} "
@@ -470,7 +466,7 @@ def _attach_user_editors(
     ph = ", ".join("?" for _ in uids)
     window_sql, window_params = catalog._window_clause(start, end)
     prefix_params = [bound for pair in prefixes for bound in pair]
-    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    hist_pred = catalog.range_pred("hashtag", prefixes)
     hist = (
         f"SELECT DISTINCT uid, editor FROM {s.history_rel} "
         f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND uid IN ({ph})"
@@ -482,7 +478,7 @@ def _attach_user_editors(
         )
         recent, recent_params = f"SELECT uid, editor FROM {rrel}", []
     else:
-        recent_pred = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
+        recent_pred = catalog.range_pred("lower(x)", prefixes)
         recent = (
             f"SELECT DISTINCT uid, editor FROM {s.recent_changesets_rel} "
             f"WHERE created_at >= ?{window_sql} AND uid IN ({ph}) "
@@ -704,7 +700,7 @@ def hashtags(
     s = _with_recent_tail_cache(con, s, prefixes, start, end)
     window_sql, window_params = catalog._window_clause(start, end)
     prefix_params = [bound for pair in prefixes for bound in pair]
-    hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+    hist_pred = catalog.range_pred("hashtag", prefixes)
 
     parts: list[str] = []
     params: list[object] = []
@@ -735,7 +731,7 @@ def hashtags(
         rrel = catalog.recent_cooccur_agg(s.pg_attach, prefixes=prefixes, frontier=s.frontier, start=start, end=end)
         parts.append(f"SELECT hashtag, uid, mc FROM {rrel}")
     else:
-        recent_match = " OR ".join("(lower(x) >= ? AND lower(x) < ?)" for _ in prefixes)
+        recent_match = catalog.range_pred("lower(x)", prefixes)
         parts.append(
             f"SELECT lower(h) AS hashtag, uid, mc FROM (SELECT c.uid, UNNEST(c.hashtags) AS h, cs.mc AS mc "
             f"FROM {s.recent_changesets_rel} c JOIN (SELECT changeset_id, {map_changes_sum(alias='mc')} "
@@ -824,7 +820,7 @@ def map_points(
         if "lon" in history_cols and "lat" in history_cols:
             window_sql, window_params = catalog._window_clause(start, end)
             prefix_params = [bound for pair in prefixes for bound in pair]
-            hist_pred = " OR ".join("(hashtag >= ? AND hashtag < ?)" for _ in prefixes)
+            hist_pred = catalog.range_pred("hashtag", prefixes)
             hist = (
                 f"SELECT changeset_id, uid, lon, lat FROM {s.history_rel} "
                 f"WHERE ({hist_pred}) AND created_at < ?{window_sql} AND lon IS NOT NULL"

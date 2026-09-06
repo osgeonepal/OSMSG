@@ -1,7 +1,5 @@
 """The hashtag_changeset builder: per-changeset counts summed across seqs, tag_stats merged."""
 
-from __future__ import annotations
-
 import duckdb
 import pytest
 

@@ -19,6 +19,7 @@ import duckdb
 from litestar.exceptions import HTTPException, TooManyRequestsException
 
 from osmsg import query
+from osmsg.db.pg import attach_postgres
 from osmsg.db.schema import _apply_runtime_pragmas
 from osmsg.history import fetch_manifest
 from osmsg.query import Sources
@@ -84,7 +85,7 @@ def _connect() -> duckdb.DuckDBPyConnection:
     con.execute("SET http_retries=10;")
     # Memory/temp pragmas so concurrent pooled queries cannot sum past the container memory cap.
     _apply_runtime_pragmas(con)
-    con.execute(f"ATTACH '{_libpq_dsn().replace(chr(39), chr(39) * 2)}' AS pg (TYPE postgres, READ_ONLY)")
+    attach_postgres(con, _libpq_dsn(), read_only=True)
     return con
 
 
@@ -188,7 +189,9 @@ def _run(fn, hashtag, **kwargs):
 
     def _watchdog() -> None:
         nonlocal interrupted
-        if not done.wait(_QUERY_TIMEOUT):
+        # Re-check done before interrupting: a query that finished at the timeout boundary must not be
+        # interrupted, or its now-idle connection carries a pending interrupt to the next borrower.
+        if not done.wait(_QUERY_TIMEOUT) and not done.is_set():
             interrupted = True
             with contextlib.suppress(duckdb.Error):
                 con.interrupt()
@@ -209,7 +212,9 @@ def _run(fn, hashtag, **kwargs):
     finally:
         done.set()
         watcher.join()  # ensure no interrupt is still pending before the connection is reused
-        if healthy:
+        # Recycle any connection whose watchdog fired, even if the query returned in the race window, so a
+        # late interrupt never reaches the next borrower.
+        if healthy and not interrupted:
             pool.put(con)
         else:
             with contextlib.suppress(duckdb.Error):
@@ -324,7 +329,9 @@ def _run_global(fn, **kwargs):
 
     def _watchdog() -> None:
         nonlocal interrupted
-        if not done.wait(_QUERY_TIMEOUT):
+        # Re-check done before interrupting so a query that finished at the timeout boundary is not
+        # interrupted on its now-idle connection.
+        if not done.wait(_QUERY_TIMEOUT) and not done.is_set():
             interrupted = True
             with contextlib.suppress(duckdb.Error):
                 con.interrupt()
@@ -342,7 +349,8 @@ def _run_global(fn, **kwargs):
     finally:
         done.set()
         watcher.join()
-        if healthy:
+        # Recycle any connection whose watchdog fired, even if the query returned in the race window.
+        if healthy and not interrupted:
             pool.put(con)
         else:
             with contextlib.suppress(duckdb.Error):

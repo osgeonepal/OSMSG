@@ -1,7 +1,5 @@
 """Round-trip golden tests for parquet/csv/json/markdown writers."""
 
-from __future__ import annotations
-
 import csv
 import json
 from pathlib import Path

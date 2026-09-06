@@ -111,8 +111,8 @@ def _sql_escape(value: str) -> str:
     return value.replace("'", "''")
 
 
-# Target changesets per merge chunk. A per-tick delta is one chunk (unchanged behaviour); a month-sized
-# merge splits into many so each INSERT/UPDATE stays memory-bounded instead of rewriting all rows at once.
+# Target changesets per merge chunk: a per-tick delta is a single chunk; a month-sized merge splits
+# into many so each INSERT/UPDATE stays memory-bounded instead of rewriting all rows at once.
 _MERGE_CHUNK_ROWS = 200_000
 _MERGE_CHUNK_CAP = 64
 
@@ -147,7 +147,7 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
 
     # No enclosing transaction: one transaction over a large window pins too much in memory. Each
     # statement is idempotent (INSERT OR IGNORE / COALESCE), so per-step auto-commit is crash-safe.
-    conn.execute("SET preserve_insertion_order = false")  # stream, don't buffer to preserve order
+    conn.execute("SET preserve_insertion_order = false")
     try:
         if any(parquet_dir.glob("temp_*_users_*.parquet")):
             conn.execute(f"INSERT OR IGNORE INTO users SELECT uid, username FROM read_parquet('{pattern('users')}')")
@@ -196,8 +196,6 @@ def merge_parquet_files(conn: duckdb.DuckDBPyConnection, parquet_dir: Path, *, c
                     """
                 )
         if any(parquet_dir.glob("temp_*_changeset_stats_*.parquet")):
-            # The shard stores `tags` as a native LIST<STRUCT> (built in the handler), so ingest is a
-            # direct column copy.
             shard_glob = pattern("changeset_stats")
             for low, high in _id_ranges(conn, shard_glob):
                 conn.execute(

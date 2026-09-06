@@ -1,7 +1,5 @@
 """Single-row resume state per source_url, replaces the old per-run audit log."""
 
-from __future__ import annotations
-
 import datetime as dt
 
 from osmsg.db.schema import create_tables, get_state, upsert_state

@@ -1,7 +1,5 @@
 """Integration test against the live Geofabrik index."""
 
-from __future__ import annotations
-
 import json
 
 import pytest

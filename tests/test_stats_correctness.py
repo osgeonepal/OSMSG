@@ -1,8 +1,6 @@
 """Stats correctness guarantees: hand-counted fixtures match output exactly; reprocessing an .osc doesn't
 double-count; parallel equals single-worker; multi-file changesets aggregate; no uid is ever dropped."""
 
-from __future__ import annotations
-
 import duckdb
 import pytest
 from shapely.geometry import box

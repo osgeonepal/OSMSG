@@ -41,9 +41,9 @@ def test_fetch_closed_skips_open_and_extracts_metadata(monkeypatch):
 
 
 def test_sql_literal_helpers_escape():
-    assert check._lit(None) == "NULL"
-    assert check._lit("a'b") == "'a''b'"
-    assert check._num(None) == "NULL"
-    assert check._num(1.5) == "1.5"
-    assert check._arr([]) == "ARRAY[]::text[]"
-    assert check._arr(["#a", "#b"]) == "ARRAY['#a','#b']::text[]"
+    assert check.sql_literal(None) == "NULL"
+    assert check.sql_literal("a'b") == "'a''b'"
+    assert check._sql_number(None) == "NULL"
+    assert check._sql_number(1.5) == "1.5"
+    assert check._sql_array([]) == "ARRAY[]::text[]"
+    assert check._sql_array(["#a", "#b"]) == "ARRAY['#a','#b']::text[]"

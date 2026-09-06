@@ -2,27 +2,12 @@
 
 import datetime as dt
 
-import duckdb
-
+from .db.pg import connect_postgres, pg_execute
 from .exceptions import OsmsgError
 from .history import fetch_manifest
 from .ui import info
 
 DEFAULT_OVERLAP = dt.timedelta(days=2)
-
-
-def _attach(dsn: str) -> duckdb.DuckDBPyConnection:
-    conn = duckdb.connect()
-    conn.execute("INSTALL postgres")
-    conn.execute("LOAD postgres")
-    conn.execute(f"ATTACH '{dsn.replace(chr(39), chr(39) * 2)}' AS pg (TYPE postgres)")
-    return conn
-
-
-def _pg_execute(conn: duckdb.DuckDBPyConnection, sql: str) -> None:
-    """Run one statement natively on the attached Postgres, so a bulk DELETE is a single indexed
-    statement server-side instead of DuckDB's per-row ctid batches."""
-    conn.execute(f"CALL postgres_execute('pg', $osmsg_stmt${sql}$osmsg_stmt$)")
 
 
 def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
@@ -32,7 +17,7 @@ def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
     iso = cutoff.astimezone(dt.UTC).isoformat()
     older = f"created_at < TIMESTAMPTZ '{iso}'"
 
-    reader = _attach(dsn)
+    reader = connect_postgres(dsn)
     stats_row = reader.execute(
         "SELECT count(*) FROM pg.changeset_stats s "
         f"WHERE EXISTS (SELECT 1 FROM pg.changesets c WHERE c.changeset_id = s.changeset_id AND c.{older})"
@@ -43,12 +28,12 @@ def prune_pg(dsn: str, cutoff: dt.datetime) -> tuple[int, int]:
     cs_n = cs_row[0] if cs_row else 0
 
     if cs_n:
-        writer = _attach(dsn)
-        _pg_execute(
+        writer = connect_postgres(dsn)
+        pg_execute(
             writer,
             f"DELETE FROM changeset_stats s USING changesets c WHERE s.changeset_id = c.changeset_id AND c.{older}",
         )
-        _pg_execute(writer, f"DELETE FROM changesets WHERE {older}")
+        pg_execute(writer, f"DELETE FROM changesets WHERE {older}")
         writer.close()
     return stats_n, cs_n
 

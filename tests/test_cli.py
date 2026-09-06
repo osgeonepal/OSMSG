@@ -2,8 +2,6 @@
 mutual-exclusion checks, and error paths (no OSM network).
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
 

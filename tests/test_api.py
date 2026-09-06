@@ -7,12 +7,6 @@ from litestar.testing import TestClient
 
 from api import app as api_app
 from api.app import get_cors_origins, health
-from api.pg_schema import PG_SCHEMA as API_PG_SCHEMA
-from osmsg.pg_schema import PG_SCHEMA as CLI_PG_SCHEMA
-
-
-def test_pg_schema_in_sync():
-    assert API_PG_SCHEMA == CLI_PG_SCHEMA
 
 
 def test_v2_hashtags_split():

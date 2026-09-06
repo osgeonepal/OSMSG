@@ -1,6 +1,5 @@
-# The native tag breakdown type (osmsg.stats.PG_TAG_TYPE), which the changeset_stats.tags column
-# depends on. Created before the schema, only when absent (PG_TAG_TYPE_EXISTS_SQL): a plain CREATE TYPE
-# is a recognized write both under asyncpg and DuckDB's postgres_execute, unlike a DO/plpgsql block.
+# The native tag breakdown type the changeset_stats.tags column depends on. Created before the schema only
+# when absent; a plain CREATE TYPE is a recognized write under both asyncpg and DuckDB, unlike a DO block.
 PG_TAG_TYPE_EXISTS_SQL = "SELECT 1 FROM pg_type WHERE typname = 'osmsg_tag'"
 PG_TAG_TYPE_SQL = "CREATE TYPE osmsg_tag AS (k text, v text, c bigint, m bigint, l double precision)"
 

@@ -2,8 +2,6 @@
 behind `OSMSG_PG_DSN` (marked `network`, deselected by default).
 """
 
-from __future__ import annotations
-
 import os
 import re
 
@@ -31,7 +29,7 @@ def test_pg_schema_contains_every_osmsg_table():
 def test_pg_schema_uses_native_tag_type():
     """Tags are stored as the native osmsg_tag composite array, not JSON, so the representation matches
     the DuckDB store and the rollup (one tag path everywhere queried)."""
-    from api.pg_schema import PG_TAG_TYPE_SQL
+    from osmsg.pg_schema import PG_TAG_TYPE_SQL
 
     assert "tags           osmsg_tag[]" in PG_SCHEMA
     assert "JSONB" not in PG_SCHEMA

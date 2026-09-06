@@ -6,8 +6,6 @@ immutable, so the numbers are reproducible run to run; a drift beyond `OSMSG_API
 hashtag pins here once they return under the latency ceiling.
 """
 
-from __future__ import annotations
-
 import os
 
 import pytest

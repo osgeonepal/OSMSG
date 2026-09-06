@@ -1,7 +1,5 @@
 """The hashtag query surface combines history + recent and computes correct summary/leaderboard/tags."""
 
-from __future__ import annotations
-
 import dataclasses
 import datetime as dt
 
@@ -232,8 +230,7 @@ def _tag_written_both_ways(con) -> None:
 
 
 def test_cooccurring_hashtags_merge_case_variants(con, sources):
-    # Grouping is on the raw string, so a tag written both ways used to come back as two rows, each
-    # holding only part of the contributors. Both sides lowercase before grouping.
+    # A tag written in mixed case must group as one row; both sides lowercase before grouping.
     _tag_written_both_ways(con)
     tags = [r["hashtag"] for r in query.hashtags(con, "hotosm", sources)]
     assert "#YouthMappers" not in tags

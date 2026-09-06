@@ -1,7 +1,5 @@
 """Package-level smoke tests."""
 
-from __future__ import annotations
-
 from osmsg.__version__ import __version__
 from osmsg.exceptions import NoDataFoundError, OsmsgError
 

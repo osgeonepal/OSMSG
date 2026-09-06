@@ -1,5 +1,4 @@
-// The Editors and Related-hashtags cards render as plain HTML lists (renderEditorBarChart /
-// renderHashtagPieChart); no charting library is used.
+// Both cards are plain HTML lists, no charting library.
 
 function _ensureChartsSection() {
   if (document.getElementById("osmsg-charts-row")) return;
@@ -153,7 +152,6 @@ function _ensureChartsSection() {
 const _PER_PAGE = 5;
 let _edPage = 0, _edLen = -1;
 const _edExpanded = new Set(); // editor families expanded to show their versions
-// Editor family for grouping: a known family (iD, JOSM, ...) or the token before the first "/" or space.
 const editorGroup = (s) =>
   (typeof editorFamily === "function" && editorFamily(s)) || String(s || "Unknown").split(/[/\s]/)[0] || "Unknown";
 let _htPage = 0, _htLen = -1;

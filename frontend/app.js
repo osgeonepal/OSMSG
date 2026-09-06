@@ -444,7 +444,7 @@ $$(".preset button").forEach(
   (b.onclick = () => {
     const k = b.dataset.range;
     if (k === "custom") {
-      // Custom toggles the picker: open it if closed, close it (keeping the recorded range) if open.
+      // Custom is a toggle; closing keeps the recorded range.
       if (state.range === "custom" && customRangePanel.classList.contains("show")) {
         customRangePanel.classList.remove("show");
       } else {
@@ -463,6 +463,15 @@ const SERVER_SORT = { username: "name", map_changes: "map_changes", created: "cr
 const LEADERBOARD_TIMEOUT_MS = 130_000;
 const BUSY_RETRIES = 1;
 const BUSY_BACKOFF_MS = 2500;
+
+// Google Analytics helpers. gtag exists only when GA_MEASUREMENT_ID is set (Caddy injects it), so every
+// call is a no-op when analytics is disabled.
+function gaEvent(name, params) {
+  if (typeof gtag === "function") gtag("event", name, params);
+}
+function searchTerm() {
+  return (state.hashtags.length ? state.hashtags.join(",") : "(global)").slice(0, 100);
+}
 
 function endpoint(name, params) {
   // No hashtags -> whole-OSM (global) endpoints; the co-occurring "hashtags" section maps to global trending.
@@ -483,6 +492,7 @@ function sleep(ms, signal) {
 // A 429 means the API shed load ("retry shortly"); retry once after a short pause before showing busy.
 async function apiGet(name, params, signal) {
   for (let attempt = 0; ; attempt++) {
+    const started = performance.now();
     const res = await fetch(endpoint(name, params), { headers: { accept: "application/json" }, mode: "cors", signal });
     if (res.status === 429) {
       if (attempt < BUSY_RETRIES) {
@@ -500,7 +510,10 @@ async function apiGet(name, params, signal) {
       throw err;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText || ""}`.trim());
-    return res.json();
+    const data = await res.json();
+    // Timing excludes 429 retry/backoff so GA reports the successful call's latency.
+    gaEvent("api_timing", { endpoint: name, duration_ms: Math.round(performance.now() - started), search_term: searchTerm() });
+    return data;
   }
 }
 // Resolve the window once per query so all sections and the window bar share one [start, end); relative
@@ -589,6 +602,7 @@ async function runQuery() {
   } else {
     saveRecentSearch();
   }
+  gaEvent("search", { search_term: searchTerm(), time_range: state.range, exact_match: state.exact });
   state.query?.abort?.();
   const ctrl = new AbortController();
   state.query = ctrl;
@@ -686,7 +700,6 @@ function sliceBatchToRows() {
 async function loadLeaderboardPage(setPodium = false, forceFetch = false) {
   const startRow = (state.page - 1) * state.pageSize;
   const batchIndex = Math.floor(startRow / state.batchSize);
-  // Serve from the loaded batch when possible.
   if (!forceFetch && !setPodium && batchIndex === state.batchIndex && state.batch.length) {
     sliceBatchToRows();
     renderTable();
@@ -857,7 +870,6 @@ const renderOvCell =
         const c = data[k] || 0, m = data[k + "_mod"] || 0;
         const isZero = !c && !m;
         const metres = data[k + "_len"] || 0;
-        // Length is meaningful only for line features (highway/waterway); areas/points get no pill.
         const showKm = LINEAR_CELLS.has(k) && metres >= 100;
         const kmC = `${compact(metres / 1000)} km`, kmF = `${fmt.format(Math.round(metres / 1000))} km`;
         const pill = showKm
@@ -1378,7 +1390,7 @@ $$("th.sortable").forEach((th) => {
     else { state.sort.key = k; state.sort.dir = k === "username" ? "asc" : "desc"; }
     state.page = 1;
     writeURL();
-    loadLeaderboardPage(false, true);  // server-side sort across all users -> refetch a fresh batch
+    loadLeaderboardPage(false, true);
   };
   th.tabIndex = 0;
   th.setAttribute("role", "button");

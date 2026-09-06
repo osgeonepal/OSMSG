@@ -1,7 +1,5 @@
 """Smoke tests for the orchestration glue (no network)."""
 
-from __future__ import annotations
-
 import datetime as dt
 
 import duckdb

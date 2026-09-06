@@ -4,7 +4,7 @@ import os
 import asyncpg
 from dotenv import load_dotenv
 
-from .pg_schema import PG_SCHEMA, PG_TAG_TYPE_EXISTS_SQL, PG_TAG_TYPE_SQL
+from osmsg.pg_schema import PG_SCHEMA, PG_TAG_TYPE_EXISTS_SQL, PG_TAG_TYPE_SQL
 
 load_dotenv()
 

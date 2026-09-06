@@ -158,16 +158,14 @@ def _canonical_hashtags(hashtags: list[str]) -> list[str]:
 
 
 def _needs_changefile_changeset_filter(cfg: RunConfig) -> bool:
-    # When any metadata-side filter is on, ChangefileHandler must drop edits whose
-    # changeset_id isn't in the allowlist; otherwise stub rows for global changesets
-    # pollute the changesets table.
+    # With any metadata-side filter on, ChangefileHandler must drop edits whose changeset_id isn't in the
+    # allowlist, else stub rows for global changesets pollute the changesets table.
     return bool(cfg.hashtags or cfg.boundary or cfg.countries)
 
 
 def _resolve_valid_changesets(conn, cfg: RunConfig) -> set[int] | None:
-    # None means "no allowlist, keep everything"; a set means "drop edits to changesets
-    # not in this set". The set is whatever ChangesetHandler already filtered into the
-    # changesets table earlier in the run.
+    # None keeps everything; a set drops edits to changesets not in it (the set ChangesetHandler already
+    # filtered into the changesets table earlier in the run).
     if not _needs_changefile_changeset_filter(cfg):
         return None
     return set(list_changesets(conn))
@@ -727,9 +725,8 @@ def run(cfg: RunConfig) -> dict[str, Any]:
             "--update: resuming each source from its own state row "
             f"(earliest: {cfg.start_date.astimezone(UTC).isoformat()})"
         )
-        # Bound each run to a fixed window so a large backlog catches up over successive ticks,
-        # each committing its slice, instead of accumulating the whole gap in one pass. Source
-        # granularity was already picked from the full gap-to-now, so it stays coarse while behind.
+        # Bound each run to a fixed window so a large backlog catches up over successive ticks (each
+        # committing its slice) instead of one pass; granularity was already picked from the full gap.
         capped_end = _cap_update_window(cfg.start_date, cfg.end_date, cfg.max_update_window)
         if capped_end < cfg.end_date:
             cfg.end_date = capped_end

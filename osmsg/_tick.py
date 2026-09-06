@@ -10,6 +10,7 @@ from pathlib import Path
 import duckdb
 
 from .db import connect, create_tables, get_state, upsert_state
+from .db.pg import attach_postgres
 from .geofabrik import country_update_url
 from .replication import resolve_url
 
@@ -60,10 +61,7 @@ def _read_pg_state(dsn: str) -> list[tuple]:
     store. The DSN is interpolated into ATTACH, so it must be trusted (same contract as export.psql)."""
     conn = duckdb.connect()
     try:
-        conn.execute("INSTALL postgres")
-        conn.execute("LOAD postgres")
-        safe_dsn = dsn.replace("'", "''")
-        conn.execute(f"ATTACH '{safe_dsn}' AS pg (TYPE postgres, READ_ONLY)")
+        attach_postgres(conn, dsn, read_only=True)
         rows = conn.execute("SELECT source_url, last_seq, last_ts, updated_at FROM pg.state").fetchall()
         conn.execute("DETACH pg")
     finally:
@@ -136,7 +134,6 @@ def main() -> int:
         db_path = out / f"{name}.duckdb"
         psql_dsn = _parse_arg(extra_args, "--psql-dsn")
 
-        # Self-heal
         if psql_dsn and _store_is_dirty(db_path):
             print("[osmsg-tick] store dirty from an interrupted push; rebuilding from Postgres state", flush=True)
             _rebuild_store_from_pg(db_path, psql_dsn)
@@ -158,9 +155,8 @@ def main() -> int:
 
         print(f"[osmsg-tick] {' '.join(cmd)}", flush=True)
         rc = subprocess.call(cmd)
-        # With a psql push, Postgres is the permanent copy and the DuckDB store is only a per-tick
-        # delta buffer. Clear its data (keeping the resume `state`) after a successful push so the store
-        # stays small and the next push stays fast; otherwise it re-pushes the whole growing store each tick.
+        # With a psql push, Postgres is the permanent copy and the store is a per-tick delta buffer: clear
+        # its data (keeping resume `state`) after a successful push so the next push stays small and fast.
         if rc == 0 and psql_dsn:
             _reset_store_buffer(db_path)
         return rc

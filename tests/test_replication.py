@@ -2,8 +2,6 @@
 changesets opened before window start (OSM caps open time at 24h, so 24h max; default 1h); --update runs
 with prior state skip it."""
 
-from __future__ import annotations
-
 import datetime as dt
 
 import pytest

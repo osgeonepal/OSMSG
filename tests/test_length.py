@@ -24,7 +24,7 @@ def _run(tmp_path):
     path = tmp_path / "diff.osc.gz"
     with gzip.open(path, "wt") as fh:
         fh.write(_OSC)
-    # No "length" key in the config: length is always on now, not gated by a flag.
+    # length is unconditional; the config carries no length flag.
     cfg = {
         "start_date_utc": dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
         "whitelisted_users": None,

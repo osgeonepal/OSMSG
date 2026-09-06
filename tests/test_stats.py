@@ -1,7 +1,5 @@
 """The shared stats vocabulary must compute the right numbers, proven on DuckDB."""
 
-from __future__ import annotations
-
 import duckdb
 import pytest
 

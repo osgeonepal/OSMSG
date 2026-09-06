@@ -1,7 +1,5 @@
 """Unit tests for pydantic models + flatten-to-row contract."""
 
-from __future__ import annotations
-
 import datetime as dt
 
 from osmsg.models import Action, Changeset, ChangesetStats, ElementStat, TagValueStat, User

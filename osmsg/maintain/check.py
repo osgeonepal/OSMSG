@@ -7,23 +7,12 @@ from urllib.request import urlopen
 
 import duckdb
 
+from ..db.pg import connect_postgres, pg_execute, sql_literal
 from ..ui import info
 
 _HASHTAG_RE = re.compile(r"#[\w-]+")
 _API = "https://api.openstreetmap.org/api/0.6/changesets.json?changesets="
 _BATCH = 100
-
-
-def _attach(dsn: str) -> duckdb.DuckDBPyConnection:
-    conn = duckdb.connect()
-    conn.execute("INSTALL postgres")
-    conn.execute("LOAD postgres")
-    conn.execute(f"ATTACH '{dsn.replace(chr(39), chr(39) * 2)}' AS pg (TYPE postgres)")
-    return conn
-
-
-def _pg(conn: duckdb.DuckDBPyConnection, sql: str) -> None:
-    conn.execute(f"CALL postgres_execute('pg', $osmsg_stmt${sql}$osmsg_stmt$)")
 
 
 def stub_ids(conn: duckdb.DuckDBPyConnection) -> list[int]:
@@ -58,37 +47,34 @@ def fetch_closed(ids: list[int]) -> dict[int, dict]:
     return out
 
 
-# Postgres string-literal escaping: the sanitize boundary for OSM tag values (editor, comment) built into SQL.
-def _lit(value: object) -> str:
-    return "NULL" if value is None else "'" + str(value).replace("'", "''") + "'"
-
-
-def _num(value: float | None) -> str:
+def _sql_number(value: float | None) -> str:
     return "NULL" if value is None else repr(float(value))
 
 
-def _arr(values: list[str]) -> str:
-    return "ARRAY[" + ",".join(_lit(v) for v in values) + "]::text[]" if values else "ARRAY[]::text[]"
+# sql_literal is the sanitize boundary for the OSM tag values (editor, comment) built into SQL.
+def _sql_array(values: list[str]) -> str:
+    return "ARRAY[" + ",".join(sql_literal(v) for v in values) + "]::text[]" if values else "ARRAY[]::text[]"
 
 
 def _apply(conn: duckdb.DuckDBPyConnection, meta: dict[int, dict]) -> None:
     items = list(meta.items())
     for i in range(0, len(items), _BATCH):
         rows = ", ".join(
-            f"({cid}, TIMESTAMPTZ {_lit(m['created_at'])}, {_lit(m['editor'])}, {_arr(m['hashtags'])}, "
-            f"{_num(m['min_lon'])}, {_num(m['min_lat'])}, {_num(m['max_lon'])}, {_num(m['max_lat'])})"
+            f"({cid}, TIMESTAMPTZ {sql_literal(m['created_at'])}, {sql_literal(m['editor'])}, "
+            f"{_sql_array(m['hashtags'])}, {_sql_number(m['min_lon'])}, {_sql_number(m['min_lat'])}, "
+            f"{_sql_number(m['max_lon'])}, {_sql_number(m['max_lat'])})"
             for cid, m in items[i : i + _BATCH]
         )
         cte = (
             f"WITH v(changeset_id, created_at, editor, hashtags, min_lon, min_lat, max_lon, max_lat) AS (VALUES {rows})"
         )
-        _pg(
+        pg_execute(
             conn,
             f"{cte} UPDATE changesets c SET created_at = v.created_at, editor = COALESCE(c.editor, v.editor), "
             "hashtags = v.hashtags, min_lon = v.min_lon, min_lat = v.min_lat, max_lon = v.max_lon, "
             "max_lat = v.max_lat FROM v WHERE c.changeset_id = v.changeset_id AND c.created_at IS NULL",
         )
-        _pg(
+        pg_execute(
             conn,
             f"{cte} INSERT INTO changeset_hashtag (hashtag, changeset_id, created_at) "
             "SELECT lower(h), v.changeset_id, v.created_at FROM v, unnest(v.hashtags) AS h ON CONFLICT DO NOTHING",
@@ -97,7 +83,7 @@ def _apply(conn: duckdb.DuckDBPyConnection, meta: dict[int, dict]) -> None:
 
 def check_stubs(dsn: str, fix: bool = False) -> tuple[int, int]:
     """Report, and with fix=True repair, stub changesets. Returns (stubs_found, repaired)."""
-    conn = _attach(dsn)
+    conn = connect_postgres(dsn)
     try:
         ids = stub_ids(conn)
         if not ids:

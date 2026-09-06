@@ -2,8 +2,6 @@
 derived on the fly from the base tables (from the frontier on). The split at the frontier must be
 exact: no changeset counted twice, none dropped."""
 
-from __future__ import annotations
-
 import datetime as dt
 
 import duckdb

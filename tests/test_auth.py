@@ -1,7 +1,5 @@
 """CSRF parsing + retry-equipped session for the OSM/Geofabrik auth flow."""
 
-from __future__ import annotations
-
 import pytest
 from requests.adapters import HTTPAdapter
 

@@ -1,7 +1,5 @@
 """Operator env tunes DuckDB memory/threads/spill on every connection."""
 
-from __future__ import annotations
-
 import pytest
 
 from osmsg.db.schema import connect

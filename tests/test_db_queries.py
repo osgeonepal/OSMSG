@@ -1,7 +1,5 @@
 """Populate a fresh DuckDB with hand-crafted rows and verify query outputs."""
 
-from __future__ import annotations
-
 import pytest
 
 from osmsg.db.ingest import _sql_escape

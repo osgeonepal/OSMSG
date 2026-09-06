@@ -5,8 +5,6 @@ offline suite skips it. Each (endpoint, hashtag, window, filter) case is its own
 slow request flags exactly which shape regressed. Raise the ceiling with `OSMSG_API_MAX_SECONDS`.
 """
 
-from __future__ import annotations
-
 import datetime as dt
 import os
 import time

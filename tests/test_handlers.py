@@ -1,7 +1,5 @@
 """Process synthetic .osc files end-to-end through the handler and verify counts."""
 
-from __future__ import annotations
-
 import datetime as dt
 
 import pytest
@@ -336,7 +334,7 @@ def test_changeset_handler_window_filter_drops_only_pre_window_closures(tmp_path
                 "closed_at": "2026-04-27T22:10:00Z",
                 "tags": {"hashtags": "#hotosm-spans-end"},
             },
-            # created AT window end → KEEP (no `created >= end` filter anymore)
+            # created AT window end -> KEEP; there is no `created >= end` filter
             {
                 "id": 6,
                 "created_at": "2026-04-27T21:54:00Z",

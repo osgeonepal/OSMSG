@@ -1,7 +1,5 @@
 """Worker tick: command assembly + state-row lookup precedence."""
 
-from __future__ import annotations
-
 import datetime as dt
 import fcntl
 import os

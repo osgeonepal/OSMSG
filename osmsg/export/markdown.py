@@ -16,7 +16,7 @@ def _stringify(v: Any) -> str:
 
 
 def table_markdown(rows: list[dict[str, Any]], output_path: Path, headers: list[str] | None = None) -> Path:
-    """Return a GitHub-flavored markdown table for the given rows."""
+    """Write the rows as a GitHub-flavored markdown table; returns the output path."""
     headers = headers or list(rows[0].keys())
     lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
     for r in rows:

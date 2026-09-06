@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Install the built wheel into a clean environment (no source tree on sys.path) and import every osmsg
-# submodule plus run the console entrypoint. A file dropped from the wheel (e.g. excluded by a .gitignore
-# pattern) fails here instead of shipping to PyPI. Run after `uv build`, before `uv publish`.
+# Install the built wheel into a clean env and import every osmsg submodule + the entrypoint, so a file
+# dropped from the wheel fails here, not on PyPI. Run after `uv build`, before `uv publish`.
 set -euo pipefail
 
 wheel=$(ls dist/*.whl)
