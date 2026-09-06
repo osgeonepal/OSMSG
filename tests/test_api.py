@@ -142,6 +142,39 @@ def test_health_reports_503_when_db_unavailable(monkeypatch):
     assert response.status_code == 503
 
 
+def test_health_reports_503_when_data_is_stale(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    app_module = import_module("api.app")
+
+    async def old_state():
+        now = datetime.now(UTC)
+        return {"last_seq": 1, "last_ts": now - timedelta(hours=5), "updated_at": now}
+
+    monkeypatch.setattr(app_module, "fetch_state", old_state)
+    with TestClient(Litestar(route_handlers=[health])) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 503
+
+
+def test_health_ok_when_data_is_fresh(monkeypatch):
+    from datetime import UTC, datetime
+
+    app_module = import_module("api.app")
+
+    async def fresh_state():
+        now = datetime.now(UTC)
+        return {"last_seq": 1, "last_ts": now, "updated_at": now}
+
+    monkeypatch.setattr(app_module, "fetch_state", fresh_state)
+    with TestClient(Litestar(route_handlers=[health])) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
 def test_window_normalizes_naive_datetime_to_utc():
     from datetime import UTC, datetime
 

@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import asyncpg
@@ -19,6 +20,7 @@ from .routers.hashtag import v2_router
 from .schemas import HealthResponse
 
 FRONTEND_DIST = os.getenv("FRONTEND_DIST")
+_MAX_STALENESS = timedelta(seconds=int(os.getenv("OSMSG_HEALTH_MAX_STALENESS_SECONDS", "1800")))
 DEFAULT_CORS_ORIGINS = (
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -91,6 +93,13 @@ async def health() -> HealthResponse:
         state = await fetch_state()
     except (OSError, asyncpg.PostgresError) as exc:
         raise HTTPException(status_code=503, detail="database unavailable") from exc
+    if state and state["last_ts"] is not None:
+        last_ts = state["last_ts"]
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=UTC)
+        age = datetime.now(UTC) - last_ts
+        if age > _MAX_STALENESS:
+            raise HTTPException(status_code=503, detail=f"stale: newest data is {age} old")
     return HealthResponse(
         status="ok",
         last_seq=state["last_seq"] if state else None,
