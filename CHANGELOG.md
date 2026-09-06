@@ -1,3 +1,14 @@
+## v1.3.3 (2026-09-06)
+
+### Fix
+
+- **health**: add health checkup for external check of osmsg
+- **lock**: fix prune lock in db
+- **analytics**: add more analytics to track hashtags
+- **cleanup**: housekeeping
+- **readme**: add consistency
+- **ga**: add google analytics
+
 ## v1.3.2 (2026-08-30)
 
 ### Fix
